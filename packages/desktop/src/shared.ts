@@ -63,6 +63,14 @@ export interface RunRequest {
   readonly dryRun: boolean;
 }
 
+/** An irreversible op an agent wants to perform, surfaced to the operator for confirmation (FR-21/ADR-2). */
+export interface ConfirmRequest {
+  readonly id: string;
+  readonly kind: string;
+  readonly project: string;
+  readonly command: string;
+}
+
 /** A task at the human review gate, awaiting Approve/Reject (FR-14). */
 export interface ReviewItem {
   readonly id: string;
@@ -93,6 +101,10 @@ export interface MantraBridge {
   resolveReview(repoPath: string, taskId: string, approve: boolean): Promise<IntentAck>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
+  /** Subscribe to irreversible-op confirmation requests; returns an unsubscribe function. */
+  onConfirmRequest(cb: (req: ConfirmRequest) => void): () => void;
+  /** Answer a pending confirmation request. */
+  respondConfirm(id: string, approved: boolean): void;
 }
 
 declare global {

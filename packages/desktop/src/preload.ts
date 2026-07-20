@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AgentEvent, FleetSnapshot, IntentAck, IntentSource, ProjectRef, ReviewItem, RunRequest } from "./shared.js";
+import type { AgentEvent, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, ProjectRef, ReviewItem, RunRequest } from "./shared.js";
 
 /** Exposes only the typed `MantraBridge` on `window.mantra` — no raw ipcRenderer, no Node. */
 contextBridge.exposeInMainWorld("mantra", {
@@ -17,4 +17,10 @@ contextBridge.exposeInMainWorld("mantra", {
     ipcRenderer.on("agent:event", listener);
     return () => ipcRenderer.removeListener("agent:event", listener);
   },
+  onConfirmRequest: (cb: (req: ConfirmRequest) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, payload: ConfirmRequest): void => cb(payload);
+    ipcRenderer.on("confirm:request", listener);
+    return () => ipcRenderer.removeListener("confirm:request", listener);
+  },
+  respondConfirm: (id: string, approved: boolean): void => ipcRenderer.send("confirm:response", id, approved),
 });

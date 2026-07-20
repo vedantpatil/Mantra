@@ -3,6 +3,9 @@ dist/
 *.tsbuildinfo
 .DS_Store
 
+# packaged app output (the .dmg / .app — too large for git; build locally)
+packages/*/release/
+
 # local maintainer tooling & session notes — NOT part of the framework
 .claude/
 .dual-graph/

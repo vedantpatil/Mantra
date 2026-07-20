@@ -1,13 +1,14 @@
 import { app, BrowserWindow, ipcMain, type WebContents } from "electron";
+import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { projectId, taskId as makeTaskId } from "@mantra/core";
 import {
-  type CrewEvent, FileTaskLog, InProcessBus, type RunEvent, Supervisor,
+  type Confirmer, type CrewEvent, FileTaskLog, InProcessBus, type RunEvent, Supervisor,
   runAgentTask, runCrew,
 } from "@mantra/orchestrator";
 import type { AgentEvent, IntentSource, ReviewItem, RunRequest } from "./shared.js";
 import { routeIntent } from "./intent.js";
-import { FLEET } from "./fleet-stub.js";
+import { buildFleet } from "./fleet-stub.js";
 import { loadProjects, resolveTarget } from "./projects.js";
 
 /**
@@ -17,8 +18,21 @@ import { loadProjects, resolveTarget } from "./projects.js";
  * drive a real agent from the command console instead of a terminal.
  */
 
-/** Irreversible ops are auto-denied from the UI for now (a Decisions-queue confirm dialog is next). */
-const denyConfirmer = { confirm: async () => false };
+/** Pending irreversible-op confirmations, keyed by request id, awaiting the operator's answer. */
+const pendingConfirms = new Map<string, (approved: boolean) => void>();
+
+/** A Confirmer that surfaces irreversible ops to the operator as an in-app dialog (ADR-2). */
+function makeUiConfirmer(wc: WebContents): Confirmer {
+  return {
+    confirm: (action) =>
+      new Promise<boolean>((resolve) => {
+        if (wc.isDestroyed()) return resolve(false);
+        const id = randomUUID();
+        pendingConfirms.set(id, resolve);
+        wc.send("confirm:request", { id, kind: action.kind, project: String(action.projectId), command: action.args.command ?? "" });
+      }),
+  };
+}
 
 /** Hydrate a project's Supervisor from its persisted task log (read + resolve reviews). */
 function supervisorFor(repoPath: string): Supervisor {
@@ -76,7 +90,7 @@ async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
     repoPath, task: req.task,
     role: "developer", model: "claude-haiku-4-5", budgetUsd: 1,
     dryRun: req.dryRun, noPush: true, keepWorktree: req.dryRun ? false : true,
-    confirmer: denyConfirmer,
+    confirmer: makeUiConfirmer(wc),
     onEvent,
   });
 
@@ -110,7 +124,7 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
   const result = await runCrew({
     repoPath, goal: req.task,
     model: "claude-haiku-4-5", budgetUsd: 2, noPush: true,
-    confirmer: denyConfirmer,
+    confirmer: makeUiConfirmer(wc),
     onCrewEvent,
   });
   if (!result.ok) {
@@ -122,7 +136,7 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
 }
 
 void app.whenReady().then(() => {
-  ipcMain.handle("fleet:get", () => FLEET);
+  ipcMain.handle("fleet:get", () => buildFleet(listReviews()));
   ipcMain.handle("projects:list", () => loadProjects());
   ipcMain.handle("intent:submit", (_e, payload: { raw: string; source: IntentSource }) =>
     routeIntent(payload.raw, payload.source),
@@ -134,6 +148,10 @@ void app.whenReady().then(() => {
   ipcMain.handle("crew:run", (event, req: RunRequest) => {
     void startCrew(req, event.sender);
     return { ok: true, message: `crew on: ${req.task}` };
+  });
+  ipcMain.on("confirm:response", (_e, id: string, approved: boolean) => {
+    const resolve = pendingConfirms.get(id);
+    if (resolve) { pendingConfirms.delete(id); resolve(approved); }
   });
   ipcMain.handle("reviews:list", () => listReviews());
   ipcMain.handle("review:resolve", (_e, repoPath: string, id: string, approve: boolean) => {
@@ -147,6 +165,22 @@ void app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // Boot smoke test: verify the full stack initializes without a display — main, preload,
+  // window, and the React renderer loading + calling IPC — then exit with a pass/fail code.
+  if (process.env.MANTRA_SMOKE === "1") {
+    const win = BrowserWindow.getAllWindows()[0];
+    let rendererErrors = 0;
+    win?.webContents.on("console-message", (_e, level, message) => {
+      if (level >= 3) { rendererErrors++; console.log(`[renderer error] ${message}`); }
+    });
+    win?.webContents.on("did-finish-load", () => console.log("[mantra] renderer loaded"));
+    win?.webContents.on("did-fail-load", (_e, code, desc) => { rendererErrors++; console.log(`[renderer fail] ${code} ${desc}`); });
+    setTimeout(() => {
+      console.log(`[mantra] boot ${rendererErrors === 0 ? "ok" : "FAILED"} — main, preload, window, renderer initialized (${rendererErrors} renderer errors)`);
+      app.exit(rendererErrors === 0 ? 0 : 1);
+    }, 2500);
+  }
 });
 
 app.on("window-all-closed", () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FleetProject, FleetSnapshot, IntentSource, ReviewItem } from "../shared.js";
+import type { ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, ReviewItem } from "../shared.js";
 
 interface Line {
   readonly kind: "you" | "sys" | "err";
@@ -40,6 +40,7 @@ function Project({ p }: { p: FleetProject }): JSX.Element {
 export default function App(): JSX.Element {
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
   const [reviews, setReviews] = useState<readonly ReviewItem[]>([]);
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [mode, setMode] = useState<IntentSource>("console");
   const [listening, setListening] = useState(false);
   const [input, setInput] = useState("");
@@ -65,8 +66,16 @@ export default function App(): JSX.Element {
         setLines((ls) => [...ls, { kind: "sys", text: `✓ done · cost $${e.costUsd.toFixed(4)} · ${e.stopReason}${detail}` }]);
       } else if (e.kind === "error") setLines((ls) => [...ls, { kind: "err", text: `✗ ${e.message}` }]);
     });
-    return unsub;
+    const unsubConfirm = window.mantra.onConfirmRequest(setConfirmReq);
+    return () => { unsub(); unsubConfirm(); };
   }, []);
+
+  function answerConfirm(approved: boolean): void {
+    if (!confirmReq) return;
+    window.mantra.respondConfirm(confirmReq.id, approved);
+    setLines((ls) => [...ls, { kind: approved ? "sys" : "err", text: `${approved ? "✓ approved" : "✗ denied"} ${confirmReq.kind}${confirmReq.command ? ` (${confirmReq.command})` : ""}` }]);
+    setConfirmReq(null);
+  }
 
   async function resolveReview(item: ReviewItem, approve: boolean): Promise<void> {
     const ack = await window.mantra.resolveReview(item.repoPath, item.id, approve);
@@ -128,6 +137,22 @@ export default function App(): JSX.Element {
 
   return (
     <div className="app">
+      {confirmReq && (
+        <div className="modal-scrim">
+          <div className="modal">
+            <div className="modal-h">⚠ Irreversible action</div>
+            <div className="modal-b">
+              An agent wants to <b>{confirmReq.kind}</b> in <b>{confirmReq.project}</b>.
+              {confirmReq.command && <pre className="modal-cmd">{confirmReq.command}</pre>}
+              This cannot be undone. Approve only if you intend it.
+            </div>
+            <div className="modal-btns">
+              <button className="db" onClick={() => answerConfirm(false)}>Deny</button>
+              <button className="db primary" onClick={() => answerConfirm(true)}>Approve</button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <span className="logo no-drag" />
         <span className="brand">Mantra</span>
@@ -147,9 +172,22 @@ export default function App(): JSX.Element {
               <div className="kpi"><div className="v amber">{fleet?.needYou ?? 0}</div><div className="l">Need you</div></div>
             </div>
           </div>
-          <div className="fleet">
-            {fleet?.projects.map((p) => <Project key={p.id} p={p} />)}
-          </div>
+          {fleet && fleet.projects.length === 0 ? (
+            <div className="pcard" style={{ gridColumn: "1 / -1" }}>
+              <div className="pcard-h"><span className="hp idle" /><span className="nm">No projects registered</span></div>
+              <div className="s" style={{ color: "var(--muted)", fontSize: 12.5 }}>
+                Add projects to <code>~/.mantra/projects.json</code>, e.g.
+                <pre style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--violet)", whiteSpace: "pre-wrap", marginTop: 6 }}>{`{ "projects": [
+  { "id": "website", "name": "VPSTech Website",
+    "repoPath": "/Users/you/Projects/VPSTech/Website" } ] }`}</pre>
+                Then run from the console: <code>crew website: &lt;goal&gt;</code>
+              </div>
+            </div>
+          ) : (
+            <div className="fleet">
+              {fleet?.projects.map((p) => <Project key={p.id} p={p} />)}
+            </div>
+          )}
         </main>
 
         <aside className="rail">
