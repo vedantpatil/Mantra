@@ -1,5 +1,5 @@
 import { resolveGrant, taskId, agentId, projectId } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -29,5 +29,13 @@ assert(sup.snapshot()[0].state === "leased", "task leased");
 clock += 10 * 60_000; // advance past lease TTL — simulate agent crash
 const requeued = sup.reconcile();
 assert(requeued.length === 1 && sup.snapshot()[0].state === "queued", "crashed task auto-requeued");
+
+// 4. tool → capability → grant decisions (ADR-4, drives AgentRunner canUseTool)
+assert(decideTool("developer", "Read", {}).grant === "allow", "developer Read allowed");
+assert(decideTool("marketer", "Write", {}).grant === "deny", "marketer Write denied");
+assert(capabilityForBash("rm -rf build") === "fsDelete", "rm -rf classified fsDelete");
+assert(decideTool("developer", "Bash", { command: "rm -rf build" }).grant === "deny", "developer rm denied outright (no grant)");
+assert(decideTool("devops", "Bash", { command: "ssh host 'docker compose up'" }).grant === "confirm", "devops ssh deploy needs confirm");
+assert(decideTool("developer", "Bash", { command: "npm test" }).capability === "editCode", "generic bash → editCode");
 
 console.log("\nAll smoke checks passed ✓");

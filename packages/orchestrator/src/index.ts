@@ -1,6 +1,7 @@
 export * from "./bus.js";
 export * from "./breaker.js";
 export * from "./effector.js";
+export * from "./tool-permissions.js";
 export * from "./worktree.js";
 export * from "./router.js";
 export * from "./agent-runner.js";

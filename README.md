@@ -19,6 +19,7 @@ concurrency and failure — **safety is enforced by deterministic code, never by
 | Sole-writer registry, versioned schema | ADR-6 | `core/registry.ts` |
 | Structured intent + target-confirm | ADR-7 | `core/intent.ts`, `orchestrator/router.ts` |
 | Bus behind one interface | ADR-9 | `orchestrator/bus.ts` |
+| Enforcement wired into the live agent | ADR-2/3/4 | `orchestrator/agent-runner.ts` (`canUseTool`), `orchestrator/tool-permissions.ts` |
 
 ## Packages
 
@@ -39,6 +40,12 @@ node scripts/smoke.mjs   # exercises breaker trip, lease reconciliation, permiss
 ## Status
 
 P1 spine — core domain + orchestrator control paths scaffolded and smoke-verified.
-**Next:** wire `@anthropic-ai/claude-agent-sdk` into `AgentRunner` with PreToolUse enforcement,
-persist the task log to `.mantra/state/`, and build the Electron shell (fleet view + push-to-talk
-+ command console). No agent is wired to real tools yet.
+`AgentRunner` is wired to `@anthropic-ai/claude-agent-sdk`: each agent is a real Claude Code
+session (cwd = its worktree), with the permission matrix + circuit breaker enforced in the
+`canUseTool` callback and irreversible tool calls rewritten into `Effector` actions (ADR-2/3/4).
+The API key is resolved inside the trusted boundary and injected via the agent process env,
+never the prompt. A live end-to-end run needs `ANTHROPIC_API_KEY`; typecheck + `scripts/smoke.mjs`
+(which covers the deterministic decision core in `tool-permissions.ts`) run offline.
+
+**Next:** persist the task log to `.mantra/state/` + SQLite `RegistryWriter`; then the Electron
+shell (fleet view + push-to-talk + command console); then prototype P2 Manager→Dev→QA delegation.
