@@ -1,7 +1,11 @@
 import { app, BrowserWindow, ipcMain, type WebContents } from "electron";
-import { join } from "node:path";
-import { type CrewEvent, type RunEvent, runAgentTask, runCrew } from "@mantra/orchestrator";
-import type { AgentEvent, IntentSource, RunRequest } from "./shared.js";
+import { basename, join } from "node:path";
+import { projectId, taskId as makeTaskId } from "@mantra/core";
+import {
+  type CrewEvent, FileTaskLog, InProcessBus, type RunEvent, Supervisor,
+  runAgentTask, runCrew,
+} from "@mantra/orchestrator";
+import type { AgentEvent, IntentSource, ReviewItem, RunRequest } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { FLEET } from "./fleet-stub.js";
 import { loadProjects, resolveTarget } from "./projects.js";
@@ -15,6 +19,25 @@ import { loadProjects, resolveTarget } from "./projects.js";
 
 /** Irreversible ops are auto-denied from the UI for now (a Decisions-queue confirm dialog is next). */
 const denyConfirmer = { confirm: async () => false };
+
+/** Hydrate a project's Supervisor from its persisted task log (read + resolve reviews). */
+function supervisorFor(repoPath: string): Supervisor {
+  const sink = new FileTaskLog(repoPath);
+  const sup = new Supervisor(projectId(basename(repoPath)), new InProcessBus(), () => Date.now(), sink);
+  sup.hydrate(sink.replay());
+  return sup;
+}
+
+/** Collect review-gate tasks across all registered projects (FR-2 / FR-14). */
+function listReviews(): ReviewItem[] {
+  const items: ReviewItem[] = [];
+  for (const p of loadProjects()) {
+    for (const t of supervisorFor(p.repoPath).tasksInState("review")) {
+      items.push({ id: t.id, title: t.title, project: p.name, repoPath: p.repoPath });
+    }
+  }
+  return items;
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -95,6 +118,7 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
     return;
   }
   send({ kind: "line", text: `▸ crew done · ${result.reviewTitles.length} in review, ${result.failedTitles.length} failed. Approve in the Decisions queue.` });
+  send({ kind: "reviews-changed" });
 }
 
 void app.whenReady().then(() => {
@@ -110,6 +134,13 @@ void app.whenReady().then(() => {
   ipcMain.handle("crew:run", (event, req: RunRequest) => {
     void startCrew(req, event.sender);
     return { ok: true, message: `crew on: ${req.task}` };
+  });
+  ipcMain.handle("reviews:list", () => listReviews());
+  ipcMain.handle("review:resolve", (_e, repoPath: string, id: string, approve: boolean) => {
+    const sup = supervisorFor(repoPath);
+    if (approve) sup.approve(makeTaskId(id));
+    else sup.requeue(makeTaskId(id));
+    return { ok: true, message: approve ? "approved" : "sent back for changes" };
   });
 
   createWindow();

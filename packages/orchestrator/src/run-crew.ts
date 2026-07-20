@@ -1,7 +1,8 @@
 import { basename } from "node:path";
 import { projectId, secretRef } from "@mantra/core";
 import { AgentExecutor } from "./agent-executor.js";
-import { type CrewEvent, Coordinator, HeuristicPlanner, type Planner } from "./coordinator.js";
+import { AgentPlanner } from "./agent-planner.js";
+import { type CrewEvent, Coordinator, type Planner } from "./coordinator.js";
 import type { Confirmer } from "./effector.js";
 import { loadProjectConfig } from "./project-config.js";
 import { type RunEvent, isGitRepo } from "./run-task.js";
@@ -64,9 +65,17 @@ export async function runCrew(opts: RunCrewOptions): Promise<RunCrewResult> {
     onRunEvent: (task, e) => opts.onRunEvent?.(task.title, e),
   });
 
-  const coordinator = new Coordinator(supervisor, opts.planner ?? new HeuristicPlanner(), executor, {
-    onEvent: opts.onCrewEvent,
-  });
+  const planner =
+    opts.planner ??
+    new AgentPlanner({
+      repoPath: opts.repoPath,
+      model: opts.model,
+      budgetUsd: opts.budgetUsd,
+      confirmer: opts.confirmer,
+      noGraph: opts.noGraph,
+      onRunEvent: (e) => opts.onRunEvent?.("Manager planning", e),
+    });
+  const coordinator = new Coordinator(supervisor, planner, executor, { onEvent: opts.onCrewEvent });
 
   try {
     const result = await coordinator.runGoal(opts.goal, "operator");

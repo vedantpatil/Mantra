@@ -47,6 +47,7 @@ export interface RunTaskResult {
   readonly diffStat: string;
   readonly worktreePath: string;
   readonly branch: string;
+  readonly finalText: string;
   readonly error?: string;
 }
 
@@ -71,7 +72,7 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
   const emit = (e: RunEvent): void => opts.onEvent?.(e);
   const name = basename(opts.repoPath);
   const pid = projectId(name);
-  const empty = { sessionId: "", costUsd: 0, diffStat: "", worktreePath: "", branch: "" };
+  const empty = { sessionId: "", costUsd: 0, diffStat: "", worktreePath: "", branch: "", finalText: "" };
 
   if (!isGitRepo(opts.repoPath)) {
     return { ...empty, ok: false, stopReason: "error", error: `${opts.repoPath} is not a git repository` };
@@ -130,7 +131,7 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
     const diffStat = execFileSync("git", ["-C", wt.path, "--no-pager", "diff", "--stat"], { encoding: "utf8" }).trim();
     return {
       ok: true, sessionId: result.sessionId, costUsd: result.costUsd, stopReason: result.stopReason,
-      tripped, diffStat, worktreePath: wt.path, branch: wt.branch,
+      tripped, diffStat, worktreePath: wt.path, branch: wt.branch, finalText: result.finalText,
     };
   } catch (e) {
     return {

@@ -47,6 +47,8 @@ export interface AgentRunResult {
   readonly sessionId: string;
   readonly costUsd: number;
   readonly stopReason: "completed" | "breaker" | "error";
+  /** The agent's final result text (used by the Manager planner to read a task list). */
+  readonly finalText: string;
 }
 
 const ROLE_PROMPTS: Readonly<Record<Role, string>> = {
@@ -164,6 +166,7 @@ export class AgentRunner {
 
     let sessionId = spec.resumeSessionId ?? "";
     let costUsd = 0;
+    let finalText = "";
     await bus.publish(`agent.${spec.projectId}.started`, { agentId: spec.id, role: spec.role });
 
     for await (const message of query({ prompt, options })) {
@@ -175,6 +178,7 @@ export class AgentRunner {
         sessionId = message.session_id;
         if (message.subtype === "success") {
           costUsd = message.total_cost_usd;
+          finalText = message.result;
           breaker.record({
             inputTokens: message.usage.input_tokens,
             outputTokens: message.usage.output_tokens,
@@ -185,6 +189,6 @@ export class AgentRunner {
 
     const stopReason: AgentRunResult["stopReason"] = breaker.isTripped ? "breaker" : "completed";
     await bus.publish(`agent.${spec.projectId}.done`, { agentId: spec.id, sessionId, costUsd, stopReason });
-    return { sessionId, costUsd, stopReason };
+    return { sessionId, costUsd, stopReason, finalText };
   }
 }

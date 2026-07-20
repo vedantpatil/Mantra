@@ -60,10 +60,16 @@ crew website: add a contact form                            # a crew: Manager �
 
 A **crew** run decomposes the goal into tasks and drives them through the Supervisor's
 resumable task queue (Manager decomposes → Developer implements → QA verifies → human
-review). Coordination is deterministic and deadlock-free: handoffs go through the queue,
-never blocking waits; a per-task attempt cap prevents doom-loops; finished work lands in
-`review` and waits for your approval (no agent self-approves). The crew's state persists to
-`.mantra/state/`, so an interrupted crew resumes exactly where it stopped.
+review). The Manager is a real agent that inspects the repo (read-only, dual-graph-backed)
+and emits a structured task list; if its output doesn't parse, a heuristic decomposition
+keeps the crew moving. Coordination is deterministic and deadlock-free: handoffs go through
+the queue, never blocking waits; a per-task attempt cap prevents doom-loops; finished work
+lands in `review` and waits for your approval — no agent self-approves. The crew's state
+persists to `.mantra/state/`, so an interrupted crew resumes exactly where it stopped.
+
+Review-gate tasks appear in the app's **Awaiting your review** panel with Approve / Reject.
+Approve marks the task done; Reject sends it back to the queue for another pass. Both persist
+to the task log, so your decision survives a restart.
 
 Activity streams live into the console; the run is worktree-isolated, budget-capped, push-denied,
 and dual-graph-backed. Launch:

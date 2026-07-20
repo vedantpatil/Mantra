@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FleetProject, FleetSnapshot, IntentSource } from "../shared.js";
+import type { FleetProject, FleetSnapshot, IntentSource, ReviewItem } from "../shared.js";
 
 interface Line {
   readonly kind: "you" | "sys" | "err";
@@ -39,6 +39,7 @@ function Project({ p }: { p: FleetProject }): JSX.Element {
 
 export default function App(): JSX.Element {
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
+  const [reviews, setReviews] = useState<readonly ReviewItem[]>([]);
   const [mode, setMode] = useState<IntentSource>("console");
   const [listening, setListening] = useState(false);
   const [input, setInput] = useState("");
@@ -49,17 +50,29 @@ export default function App(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognition = useRef<{ start(): void; stop(): void } | null>(null);
 
+  const refreshReviews = (): void => {
+    void window.mantra.listReviews().then(setReviews);
+  };
+
   useEffect(() => {
     void window.mantra.getFleet().then(setFleet);
+    refreshReviews();
     const unsub = window.mantra.onAgentEvent((e) => {
       if (e.kind === "line") setLines((ls) => [...ls, { kind: "sys", text: e.text }]);
+      else if (e.kind === "reviews-changed") refreshReviews();
       else if (e.kind === "done") {
         const detail = e.diffStat ? `\n${e.diffStat}\nreview: git -C ${e.worktreePath} diff` : " · no file changes";
         setLines((ls) => [...ls, { kind: "sys", text: `✓ done · cost $${e.costUsd.toFixed(4)} · ${e.stopReason}${detail}` }]);
-      } else setLines((ls) => [...ls, { kind: "err", text: `✗ ${e.message}` }]);
+      } else if (e.kind === "error") setLines((ls) => [...ls, { kind: "err", text: `✗ ${e.message}` }]);
     });
     return unsub;
   }, []);
+
+  async function resolveReview(item: ReviewItem, approve: boolean): Promise<void> {
+    const ack = await window.mantra.resolveReview(item.repoPath, item.id, approve);
+    setLines((ls) => [...ls, { kind: "sys", text: `${approve ? "✓ approved" : "↩ sent back"}: ${item.title} — ${ack.message}` }]);
+    refreshReviews();
+  }
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [lines]);
@@ -140,6 +153,22 @@ export default function App(): JSX.Element {
         </main>
 
         <aside className="rail">
+          {reviews.length > 0 && (
+            <>
+              <div className="rail-h">Awaiting your review <span className="cnt">{reviews.length}</span></div>
+              {reviews.map((r) => (
+                <div className="dcard crit" key={r.id}>
+                  <span className="pj">{r.project}</span>
+                  <div className="t">{r.title}</div>
+                  <div className="s">Crew finished this — approve to accept, or send back for changes.</div>
+                  <div className="dbtns">
+                    <button className="db" onClick={() => void resolveReview(r, false)}>Reject</button>
+                    <button className="db primary" onClick={() => void resolveReview(r, true)}>Approve</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
           <div className="rail-h">Decisions queue <span className="cnt">{fleet?.decisions.length ?? 0} open</span></div>
           {fleet?.decisions.map((d) => (
             <div className={`dcard${d.critical ? " crit" : ""}`} key={d.id}>

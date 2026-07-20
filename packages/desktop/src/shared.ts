@@ -63,11 +63,20 @@ export interface RunRequest {
   readonly dryRun: boolean;
 }
 
+/** A task at the human review gate, awaiting Approve/Reject (FR-14). */
+export interface ReviewItem {
+  readonly id: string;
+  readonly title: string;
+  readonly project: string;
+  readonly repoPath: string;
+}
+
 /** Streamed from main → renderer during a run; the console renders these live. */
 export type AgentEvent =
   | { readonly kind: "line"; readonly text: string }
   | { readonly kind: "done"; readonly costUsd: number; readonly stopReason: string; readonly diffStat: string; readonly worktreePath: string }
-  | { readonly kind: "error"; readonly message: string };
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "reviews-changed" };
 
 /** The safe surface exposed to the renderer via contextBridge. */
 export interface MantraBridge {
@@ -78,6 +87,10 @@ export interface MantraBridge {
   runTask(req: RunRequest): Promise<IntentAck>;
   /** Kicks off a crew run (Manager decomposes → Dev/QA → review); streams via onAgentEvent. */
   runCrew(req: RunRequest): Promise<IntentAck>;
+  /** Tasks awaiting human review across all projects (the review gate). */
+  listReviews(): Promise<readonly ReviewItem[]>;
+  /** Approve (→ done) or reject (→ requeue) a review task; persists to the task log. */
+  resolveReview(repoPath: string, taskId: string, approve: boolean): Promise<IntentAck>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
 }

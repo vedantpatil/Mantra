@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -146,6 +146,39 @@ const newSup = (sink) => new Supervisor(projectId("crew"), new InProcessBus(), (
 {
   const tasks = await new HeuristicPlanner().decompose("add a contact form");
   assert(tasks.length === 2 && tasks[0].role === "developer" && tasks[1].role === "qa", "heuristic planner → developer + qa");
+}
+
+// 9f. review-gate resolve round-trip (FR-14, ADR-8): approve persists across restart
+{
+  const repo3 = mkdtempSync(join(tmpdir(), "mantra-rev-"));
+  try {
+    const s1 = newSup(new FileTaskLog(repo3));
+    const c = new Coordinator(s1, plan([{ title: "impl", role: "developer" }]), exec(() => ({ ok: true, note: "ok" })));
+    await c.runGoal("x", "manager");
+    // main.ts approve path: hydrate a fresh supervisor (with sink), approve the review task.
+    const s2 = newSup(new FileTaskLog(repo3));
+    s2.hydrate(new FileTaskLog(repo3).replay());
+    const rev = s2.tasksInState("review")[0];
+    assert(rev !== undefined, "review task present after crew");
+    s2.approve(rev.id);
+    // a third hydrate must see it done — the approval was persisted.
+    const s3 = newSup();
+    s3.hydrate(new FileTaskLog(repo3).replay());
+    assert(s3.tasksInState("done").length === 1 && s3.tasksInState("review").length === 0, "approve persists across restart → done");
+  } finally {
+    rmSync(repo3, { recursive: true, force: true });
+  }
+}
+
+// 10. Manager decomposition parsing (FR-9) — defensive against real model output
+{
+  const good = parseTaskList('Here is the plan:\n[{"title":"Add form","role":"developer"},{"title":"Test form","role":"qa"}]\nDone.');
+  assert(good.length === 2 && good[0].role === "developer" && good[1].role === "qa", "planner parses prose-wrapped JSON");
+  const badRole = parseTaskList('[{"title":"x","role":"wizard"}]');
+  assert(badRole.length === 1 && badRole[0].role === "developer", "unknown role → developer");
+  assert(parseTaskList("no json here").length === 0, "no JSON → empty (triggers fallback)");
+  assert(parseTaskList("[not valid json").length === 0, "malformed JSON → empty");
+  assert(parseTaskList('[{"role":"qa"}]').length === 0, "item without title dropped");
 }
 
 console.log("\nAll smoke checks passed ✓");
