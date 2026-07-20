@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# local maintainer tooling & session notes — NOT part of the framework
+.claude/
+.dual-graph/
+CLAUDE.md
+CONTEXT.md
+# runtime state / secrets — never commit
+~/.mantra/
+.mantra/state/
+.mantra/worktrees/
+.mantra/graph/
+*.local
+.env
+.env.*

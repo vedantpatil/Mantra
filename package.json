@@ -1,0 +1,28 @@
+{
+  "name": "mantra",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Voice + console control plane over a fleet of Claude Code agent crews.",
+  "license": "MIT",
+  "author": "Vedant Patil",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vedantpatil/Mantra.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.2"
+  }
+}
