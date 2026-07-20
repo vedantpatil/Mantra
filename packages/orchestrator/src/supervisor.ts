@@ -8,6 +8,7 @@ import {
   reduceTask,
 } from "@mantra/core";
 import type { Bus } from "./bus.js";
+import type { TaskEventSink } from "./task-log.js";
 
 /** Default task lease duration — a crashed agent's task requeues after this (ADR-5). */
 const LEASE_MS = 5 * 60_000;
@@ -27,12 +28,23 @@ export class Supervisor {
     readonly projectId: ProjectId,
     private readonly bus: Bus,
     private readonly now: () => number = () => Date.now(),
+    /** Optional durable log; when present, every applied event is persisted (ADR-5). */
+    private readonly sink?: TaskEventSink,
   ) {}
+
+  /** Rebuild in-memory state from a replayed log — no publish, no re-persist. */
+  hydrate(events: readonly TaskEvent[]): void {
+    for (const event of events) {
+      this.log.push(event);
+      this.tasks.set(event.taskId, reduceTask(this.tasks.get(event.taskId), event));
+    }
+  }
 
   private apply(event: TaskEvent): TaskProjection {
     this.log.push(event);
     const next = reduceTask(this.tasks.get(event.taskId), event);
     this.tasks.set(event.taskId, next);
+    this.sink?.append(event);
     void this.bus.publish(`task.${this.projectId}`, event);
     return next;
   }

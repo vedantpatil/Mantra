@@ -1,5 +1,8 @@
-import { resolveGrant, taskId, agentId, projectId } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash } from "@mantra/orchestrator";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -37,5 +40,40 @@ assert(capabilityForBash("rm -rf build") === "fsDelete", "rm -rf classified fsDe
 assert(decideTool("developer", "Bash", { command: "rm -rf build" }).grant === "deny", "developer rm denied outright (no grant)");
 assert(decideTool("devops", "Bash", { command: "ssh host 'docker compose up'" }).grant === "confirm", "devops ssh deploy needs confirm");
 assert(decideTool("developer", "Bash", { command: "npm test" }).capability === "editCode", "generic bash → editCode");
+
+// 5. SQLite registry round-trip (ADR-6)
+const reg = new SqliteRegistry(":memory:");
+reg.setGlobal({ defaultApiKeyRef: secretRef("vault://global"), globalDailyBudget: 30, schemaVersion: 1 });
+assert((await reg.getGlobal()).globalDailyBudget === 30, "registry global persisted");
+await reg.putProject({
+  id: projectId("p1"), name: "CareerFlint", path: "/tmp/cf", portRange: [3000, 3099],
+  webPort: 3000, apiPort: 8000, dailyBudget: 8, stage: "build", crewTemplate: "saas",
+  dualGraph: { enabled: true }, schemaVersion: 1,
+});
+const got = await reg.getProject(projectId("p1"));
+assert(got?.name === "CareerFlint" && got.portRange[1] === 3099 && got.dualGraph.enabled === true, "project round-trips through SQLite");
+await reg.putDecision({ id: decisionId("d1"), projectId: projectId("p1"), type: "deploy", title: "Deploy", summary: "x", risk: "high", options: ["hold", "deploy"], status: "open" });
+assert((await reg.listOpenDecisions()).length === 1, "open decision listed");
+await reg.resolveDecision(decisionId("d1"));
+assert((await reg.listOpenDecisions()).length === 0, "decision resolved");
+reg.close();
+
+// 6. task log persists to .mantra/state and survives a restart (ADR-5)
+const repo = mkdtempSync(join(tmpdir(), "mantra-"));
+try {
+  let clock2 = 1000;
+  const persisted = new Supervisor(projectId("p1"), new InProcessBus(), () => clock2, new FileTaskLog(repo));
+  const tk = taskId("t9");
+  persisted.createTask(tk, "persisted task", "manager");
+  persisted.lease(tk, agentId("dev1"));
+  // Simulate a process restart: replay the on-disk log into a fresh supervisor.
+  const events = new FileTaskLog(repo).replay();
+  assert(events.length === 2, "two events persisted to tasks.jsonl");
+  const restored = new Supervisor(projectId("p1"), new InProcessBus(), () => clock2);
+  restored.hydrate(events);
+  assert(restored.snapshot()[0].state === "leased", "task state restored from disk after restart");
+} finally {
+  rmSync(repo, { recursive: true, force: true });
+}
 
 console.log("\nAll smoke checks passed ✓");

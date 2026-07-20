@@ -7,3 +7,5 @@ export * from "./router.js";
 export * from "./agent-runner.js";
 export * from "./supervisor.js";
 export * from "./overseer.js";
+export * from "./task-log.js";
+export * from "./registry-sqlite.js";
