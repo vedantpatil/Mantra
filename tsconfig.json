@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
-    { "path": "packages/orchestrator" }
+    { "path": "packages/orchestrator" },
+    { "path": "packages/cli" }
   ]
 }

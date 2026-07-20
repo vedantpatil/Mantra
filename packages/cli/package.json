@@ -1,0 +1,11 @@
+{
+  "name": "@mantra/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": { "mantra": "dist/cli.js" },
+  "main": "dist/cli.js",
+  "dependencies": {
+    "@mantra/core": "0.0.1",
+    "@mantra/orchestrator": "0.0.1"
+  }
+}

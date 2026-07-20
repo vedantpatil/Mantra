@@ -29,7 +29,33 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   intent contract, event-sourced task state machine, registry types.
 - **`@mantra/orchestrator`** — the running brain: Overseer (sole registry writer, supervises
   supervisors), per-project Supervisor (task log + leases + reconciliation), AgentRunner
-  (wraps the Claude Agent SDK — stubbed), Effector, CircuitBreaker, Router, WorktreeManager, Bus.
+  (wraps the Claude Agent SDK), Effector, CircuitBreaker, Router, WorktreeManager, Bus,
+  SqliteRegistry, FileTaskLog.
+- **`@mantra/desktop`** — the Electron shell (P1 UI): fleet view + Decisions queue + a working
+  **command console** (dual to voice) and a push-to-talk affordance. Main process is the trusted
+  host (contextIsolation on, a narrow typed IPC surface); the React renderer is sandboxed. Built
+  with esbuild. Run: `npm --prefix packages/desktop run build && npm --prefix packages/desktop start`.
+- **`@mantra/cli`** — `mantra run <repo> "<task>"`: the assembled spine for a single live agent.
+  Loads `.mantra/config.json`, resolves the API key from env (ADR-3), creates a per-task git
+  worktree (ADR-1), attaches the **dual-graph context MCP** with a retrieve-before-explore
+  contract (FR-13a/ADR-11), runs the agent under the permission matrix + circuit breaker, then
+  leaves the diff for review. Flags: `--role --model --budget --no-push --no-graph --dry-run --keep`.
+
+## First live run (safe)
+
+```bash
+git clone <your-repo> ~/mantra-test/website      # a throwaway clone, never your working copy
+export ANTHROPIC_API_KEY=sk-...
+npm run build
+# read-only first — proves retrieval + zero writes:
+node packages/cli/dist/cli.js run ~/mantra-test/website "summarize the stack and main entry points" --dry-run
+# then a tiny reversible edit, push denied, cheap model, $1 cap, keep the diff:
+node packages/cli/dist/cli.js run ~/mantra-test/website "add a one-line comment to the top of README" \
+  --model claude-haiku-4-5 --budget 1 --no-push --keep
+```
+
+A/B the dual-graph token savings by running the same task with and without `--no-graph` and
+comparing the printed `cost $…`.
 
 ## Develop
 
@@ -53,5 +79,12 @@ Persistence is in: `SqliteRegistry` (Node's built-in `node:sqlite`, WAL, sole-wr
 implements `RegistryWriter`; `FileTaskLog` persists each project's task events to
 `.mantra/state/tasks.jsonl` and `Supervisor.hydrate()` rebuilds exact state on restart.
 
-**Next:** the Electron shell (fleet view + push-to-talk + command console); then prototype
-P2 Manager→Dev→QA delegation over the persisted task queue.
+The Electron shell (`@mantra/desktop`) is scaffolded and building (fleet, Decisions queue,
+command console, voice toggle/PTT — intent + fleet are stubs with a clear seam to the Overseer).
+The `@mantra/cli` harness assembles the spine end-to-end for a single live agent, dual-graph
+included. Everything is verified offline (`npm run typecheck`; `node scripts/smoke.mjs` — 27
+checks); the one thing the sandbox can't do is spawn the live Claude Code session — that's the
+first `mantra run` you'll do on a throwaway repo.
+
+**Next:** connect the shell's IPC to a live in-process Overseer + `SqliteRegistry`; wire `mantra
+run` events into the desktop activity feed; then prototype P2 Manager→Dev→QA delegation.

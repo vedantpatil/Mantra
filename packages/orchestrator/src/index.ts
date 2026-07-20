@@ -9,3 +9,5 @@ export * from "./supervisor.js";
 export * from "./overseer.js";
 export * from "./task-log.js";
 export * from "./registry-sqlite.js";
+export * from "./secrets-env.js";
+export * from "./project-config.js";

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -75,5 +75,21 @@ try {
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
+
+// 7. env secret provider (ADR-3)
+process.env.MANTRA_TEST_KEY = "sk-test-123";
+const sp = new EnvSecretProvider();
+assert((await sp.resolve(envRef("MANTRA_TEST_KEY"))) === "sk-test-123", "env secret resolves");
+let rejected = false;
+try { await sp.resolve("vault://x"); } catch { rejected = true; }
+assert(rejected, "non-env ref rejected");
+
+// 8. project config + dual-graph resolution (FR-13a / ADR-11)
+const cfg = defaultProjectConfig("website");
+assert(cfg.dualGraph.enabled === true && cfg.dailyBudget === 2, "default config sane");
+assert(resolveDualGraph(cfg, false) === undefined, "no dual-graph command → undefined");
+const cfgWithCmd = { ...cfg, dualGraph: { enabled: true, command: "dual-graph-mcp", args: ["--stdio"] } };
+assert(resolveDualGraph(cfgWithCmd, false)?.command === "dual-graph-mcp", "dual-graph resolves when command set");
+assert(resolveDualGraph(cfgWithCmd, true) === undefined, "--no-graph disables dual-graph");
 
 console.log("\nAll smoke checks passed ✓");

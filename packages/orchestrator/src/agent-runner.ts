@@ -1,6 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, Options, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentId, ProjectId, Role, SecretRef } from "@mantra/core";
+import type { AgentId, Capability, ProjectId, Role, SecretRef } from "@mantra/core";
 import type { Bus } from "./bus.js";
 import type { CircuitBreaker } from "./breaker.js";
 import { type ActionKind, type Confirmer, Effector, type SecretProvider } from "./effector.js";
@@ -15,6 +15,13 @@ import { decideTool } from "./tool-permissions.js";
  *   - the API key is resolved inside the trusted boundary and injected into the agent
  *     process env, never into the prompt (ADR-3)
  */
+/** A local dual-graph context MCP server (stdio) to attach for token savings (FR-13a, ADR-11). */
+export interface DualGraphConfig {
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+}
+
 export interface AgentSpec {
   readonly id: AgentId;
   readonly projectId: ProjectId;
@@ -24,6 +31,10 @@ export interface AgentSpec {
   readonly apiKeyRef: SecretRef;
   /** Resume a prior Claude Code session instead of starting fresh. */
   readonly resumeSessionId?: string;
+  /** When set, the agent gets a dual-graph MCP + a retrieve-before-explore contract (ADR-11). */
+  readonly dualGraph?: DualGraphConfig;
+  /** Extra lockdown: these capabilities are always denied regardless of role (e.g. --no-push, --dry-run). */
+  readonly denyCapabilities?: readonly Capability[];
 }
 
 export interface AgentRunnerDeps {
@@ -46,6 +57,19 @@ const ROLE_PROMPTS: Readonly<Record<Role, string>> = {
   marketer: "You are the Marketer. Work on docs and copy only; you have no code access.",
   ops: "You are Ops. Monitor, triage, and draft fixes; escalate incidents rather than auto-deploying.",
 };
+
+/**
+ * Retrieve-before-explore contract (ADR-11). Prepended to the role prompt whenever a
+ * dual-graph MCP is attached, so agents query the graph for recommended files/symbols
+ * instead of grepping broadly — directly cutting Claude Code token spend.
+ */
+const RETRIEVE_FIRST_POLICY = [
+  "Context policy — a dual-graph context MCP is attached. Before any file exploration:",
+  "1. Call graph_continue first; if it returns needs_project=true, call graph_scan on the cwd.",
+  "2. Read recommended_files via graph_read (one call per file; file::symbol reads only that symbol).",
+  "3. Obey confidence caps: high → stop, do not grep; medium/low → at most the stated supplementary greps/files.",
+  "Do NOT grep or broadly explore before calling graph_continue.",
+].join("\n");
 
 /** Only irreversible capabilities are routed to the Effector (grant resolves to `confirm`). */
 const CAPABILITY_TO_ACTION: Partial<Record<string, ActionKind>> = {
@@ -73,6 +97,9 @@ export class AgentRunner {
       }
 
       const { capability, grant } = decideTool(spec.role, toolName, input);
+      if (spec.denyCapabilities?.includes(capability)) {
+        return { behavior: "deny", message: `${capability} locked down for this run` };
+      }
       if (grant === "deny") {
         return { behavior: "deny", message: `role ${spec.role} may not perform ${capability}` };
       }
@@ -108,15 +135,31 @@ export class AgentRunner {
     const apiKey = await secrets.resolve(spec.apiKeyRef); // ADR-3: stays out of the prompt
     const abort = new AbortController();
 
+    const systemPrompt = spec.dualGraph
+      ? `${RETRIEVE_FIRST_POLICY}\n\n${ROLE_PROMPTS[spec.role]}`
+      : ROLE_PROMPTS[spec.role];
+
     const options: Options = {
       model: spec.model,
       cwd: spec.worktreePath,
-      systemPrompt: ROLE_PROMPTS[spec.role],
+      systemPrompt,
       permissionMode: "default",
       canUseTool: this.buildCanUseTool(spec, breaker, abort),
       env: { ...process.env, ANTHROPIC_API_KEY: apiKey },
       abortController: abort,
       ...(spec.resumeSessionId ? { resume: spec.resumeSessionId } : {}),
+      ...(spec.dualGraph
+        ? {
+            mcpServers: {
+              "dual-graph": {
+                type: "stdio" as const,
+                command: spec.dualGraph.command,
+                args: [...(spec.dualGraph.args ?? [])],
+                ...(spec.dualGraph.env ? { env: { ...spec.dualGraph.env } } : {}),
+              },
+            },
+          }
+        : {}),
     };
 
     let sessionId = spec.resumeSessionId ?? "";
