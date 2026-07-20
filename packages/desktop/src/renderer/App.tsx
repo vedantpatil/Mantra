@@ -43,8 +43,8 @@ export default function App(): JSX.Element {
   const [listening, setListening] = useState(false);
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<Line[]>([
-    { kind: "sys", text: "Mantra ready. Run a task: `run <project>: <what to do>` (read-only). Use `run!` to allow edits." },
-    { kind: "sys", text: "Also: /queue, /status, /help — or hold the mic to speak. ⌘K focuses the console." },
+    { kind: "sys", text: "Mantra ready. One agent: `run <project>: <task>` (read-only) / `run! …` (edits)." },
+    { kind: "sys", text: "A crew: `crew <project>: <goal>` — Manager decomposes → Dev/QA → your review. Or /queue, /status, /help." },
   ]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognition = useRef<{ start(): void; stop(): void } | null>(null);
@@ -64,11 +64,12 @@ export default function App(): JSX.Element {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [lines]);
 
-  /** `run <target>: <task>` (read-only) or `run! <target>: <task>` (edits allowed). */
-  function parseRun(text: string): { target: string; task: string; dryRun: boolean } | null {
-    const m = /^run(!?)\s+([^:]+):\s*(.+)$/i.exec(text);
+  /** `<verb> <target>: <text>` — verb ∈ run | run! | crew. */
+  function parseCommand(text: string): { verb: string; target: string; task: string; dryRun: boolean } | null {
+    const m = /^(run!?|crew)\s+([^:]+):\s*(.+)$/i.exec(text);
     if (!m) return null;
-    return { target: m[2].trim(), task: m[3].trim(), dryRun: m[1] !== "!" };
+    const verb = m[1].toLowerCase();
+    return { verb, target: m[2].trim(), task: m[3].trim(), dryRun: verb === "run" };
   }
 
   async function submit(raw: string, source: IntentSource): Promise<void> {
@@ -76,10 +77,11 @@ export default function App(): JSX.Element {
     if (!text) return;
     setLines((ls) => [...ls, { kind: "you", text }]);
     setInput("");
-    const run = parseRun(text);
-    const ack = run
-      ? await window.mantra.runTask(run)
-      : await window.mantra.submitIntent(text, source);
+    const cmd = parseCommand(text);
+    let ack;
+    if (cmd?.verb === "crew") ack = await window.mantra.runCrew({ target: cmd.target, task: cmd.task, dryRun: false });
+    else if (cmd) ack = await window.mantra.runTask({ target: cmd.target, task: cmd.task, dryRun: cmd.dryRun });
+    else ack = await window.mantra.submitIntent(text, source);
     setLines((ls) => [...ls, { kind: ack.ok ? "sys" : "err", text: ack.message }]);
   }
 

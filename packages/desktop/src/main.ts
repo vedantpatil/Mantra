@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, type WebContents } from "electron";
 import { join } from "node:path";
-import { type RunEvent, runAgentTask } from "@mantra/orchestrator";
+import { type CrewEvent, type RunEvent, runAgentTask, runCrew } from "@mantra/orchestrator";
 import type { AgentEvent, IntentSource, RunRequest } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { FLEET } from "./fleet-stub.js";
@@ -64,6 +64,39 @@ async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
   send({ kind: "done", costUsd: result.costUsd, stopReason: result.tripped ?? result.stopReason, diffStat: result.diffStat, worktreePath: result.worktreePath });
 }
 
+async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
+  const send = (e: AgentEvent): void => {
+    if (!wc.isDestroyed()) wc.send("agent:event", e);
+  };
+  const repoPath = resolveTarget(req.target, loadProjects());
+  if (!repoPath) {
+    send({ kind: "error", message: `unknown project or path: "${req.target}".` });
+    return;
+  }
+  const onCrewEvent = (e: CrewEvent): void => {
+    const text =
+      e.type === "planned" ? `▸ Manager decomposed the goal into ${e.count} tasks`
+      : e.type === "executed" ? `  · ${e.title} — ${e.ok ? "done" : "failed"} (${e.note})`
+      : e.type === "verified" ? `  · QA ${e.pass ? "passed" : "rejected"}: ${e.title}`
+      : e.type === "requeued" ? `  ↻ requeued (attempt ${e.attempt}): ${e.title}`
+      : e.type === "review" ? `  ✓ ready for your review: ${e.title}`
+      : `  ✗ failed: ${e.title} — ${e.reason}`;
+    send({ kind: "line", text });
+  };
+
+  const result = await runCrew({
+    repoPath, goal: req.task,
+    model: "claude-haiku-4-5", budgetUsd: 2, noPush: true,
+    confirmer: denyConfirmer,
+    onCrewEvent,
+  });
+  if (!result.ok) {
+    send({ kind: "error", message: result.error ?? "crew run failed" });
+    return;
+  }
+  send({ kind: "line", text: `▸ crew done · ${result.reviewTitles.length} in review, ${result.failedTitles.length} failed. Approve in the Decisions queue.` });
+}
+
 void app.whenReady().then(() => {
   ipcMain.handle("fleet:get", () => FLEET);
   ipcMain.handle("projects:list", () => loadProjects());
@@ -73,6 +106,10 @@ void app.whenReady().then(() => {
   ipcMain.handle("task:run", (event, req: RunRequest) => {
     void startRun(req, event.sender); // fire-and-forget; progress streams via agent:event
     return { ok: true, message: `running: ${req.task}${req.dryRun ? " (dry-run)" : ""}` };
+  });
+  ipcMain.handle("crew:run", (event, req: RunRequest) => {
+    void startCrew(req, event.sender);
+    return { ok: true, message: `crew on: ${req.task}` };
   });
 
   createWindow();

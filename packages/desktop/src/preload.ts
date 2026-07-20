@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("mantra", {
   getFleet: (): Promise<FleetSnapshot> => ipcRenderer.invoke("fleet:get"),
   listProjects: (): Promise<readonly ProjectRef[]> => ipcRenderer.invoke("projects:list"),
   runTask: (req: RunRequest): Promise<IntentAck> => ipcRenderer.invoke("task:run", req),
+  runCrew: (req: RunRequest): Promise<IntentAck> => ipcRenderer.invoke("crew:run", req),
   onAgentEvent: (cb: (event: AgentEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AgentEvent): void => cb(payload);
     ipcRenderer.on("agent:event", listener);

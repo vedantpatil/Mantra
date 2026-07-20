@@ -1,4 +1,5 @@
 import type { AgentId, ProjectId, TaskId } from "./ids.js";
+import type { Role } from "./permissions.js";
 
 /**
  * Event-sourced tasks with TTL leases (ADR-5). The append-only event log is the
@@ -19,7 +20,7 @@ export interface Lease {
 }
 
 export type TaskEvent =
-  | { type: "created"; taskId: TaskId; projectId: ProjectId; title: string; createdBy: string; at: number }
+  | { type: "created"; taskId: TaskId; projectId: ProjectId; title: string; createdBy: string; role?: Role; at: number }
   | { type: "leased"; taskId: TaskId; agentId: AgentId; expiresAt: number; at: number }
   | { type: "progress"; taskId: TaskId; note: string; at: number }
   | { type: "movedToReview"; taskId: TaskId; at: number }
@@ -35,6 +36,10 @@ export interface TaskProjection {
   readonly state: TaskState;
   readonly lease?: Lease;
   readonly createdBy: string;
+  /** Which crew role this task is assigned to (delegation). */
+  readonly assigneeRole?: Role;
+  /** Number of times requeued — the coordinator caps this to prevent doom-loops (ADR-4). */
+  readonly attempts: number;
   readonly updatedAt: number;
 }
 
@@ -47,6 +52,8 @@ export function reduceTask(prev: TaskProjection | undefined, ev: TaskEvent): Tas
       title: ev.title,
       state: "queued",
       createdBy: ev.createdBy,
+      assigneeRole: ev.role,
+      attempts: 0,
       updatedAt: ev.at,
     };
   }
@@ -64,8 +71,9 @@ export function reduceTask(prev: TaskProjection | undefined, ev: TaskEvent): Tas
     case "failed":
       return { ...base, state: "failed", lease: undefined };
     case "leaseExpired":
-    case "requeued":
       return { ...base, state: "queued", lease: undefined };
+    case "requeued":
+      return { ...base, state: "queued", lease: undefined, attempts: prev.attempts + 1 };
   }
 }
 

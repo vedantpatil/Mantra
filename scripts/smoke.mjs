@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -94,5 +94,58 @@ assert(dg?.args?.[0] === "--stdio", "dual-graph default args --stdio");
 assert(dg?.env?.DG_DATA_DIR === "/repo/x/.dual-graph" && dg?.env?.DUAL_GRAPH_PROJECT_ROOT === "/repo/x", "per-repo env auto-derived");
 assert(resolveDualGraph(cfgWithCmd, "/repo/x", true) === undefined, "--no-graph disables dual-graph");
 assert(resolveDualGraph({ ...cfg, dualGraph: { enabled: false } }, "/repo/x", false) === undefined, "disabled config → no dual-graph");
+
+// 9. P2 crew coordination (FR-9/10, ADR-5/8) — the highest-risk piece
+const plan = (tasks) => ({ decompose: async () => tasks });
+const exec = (fn) => ({ execute: async (t) => fn(t) });
+const verifier = (fn) => ({ verify: async (t) => fn(t) });
+const newSup = (sink) => new Supervisor(projectId("crew"), new InProcessBus(), () => Date.now(), sink);
+
+// 9a. happy path: dev task executes, QA passes → review
+{
+  const sup = newSup();
+  const c = new Coordinator(sup, plan([{ title: "impl", role: "developer" }]), exec(() => ({ ok: true, note: "done" })), { verify: verifier(() => ({ pass: true, note: "ok" })) });
+  const r = await c.runGoal("add form", "manager");
+  assert(r.review.length === 1 && r.failed.length === 0 && r.review[0].state === "review", "crew: dev+QA pass → review");
+}
+
+// 9b. QA rejects once, then passes → requeue then review (attempts tracked)
+{
+  const sup = newSup();
+  let vc = 0;
+  const c = new Coordinator(sup, plan([{ title: "impl", role: "developer" }]), exec(() => ({ ok: true, note: "done" })), { verify: verifier(() => ({ pass: ++vc > 1, note: "v" })) });
+  const r = await c.runGoal("add form", "manager");
+  assert(r.review.length === 1 && r.review[0].attempts === 1, "crew: QA reject→requeue→pass→review (1 attempt)");
+}
+
+// 9c. doom-loop cap: executor always fails → task fails after maxAttempts (termination proof)
+{
+  const sup = newSup();
+  const c = new Coordinator(sup, plan([{ title: "bad", role: "developer" }]), exec(() => ({ ok: false, note: "boom" })), { maxAttempts: 2 });
+  const r = await c.runGoal("break", "manager");
+  assert(r.failed.length === 1 && r.review.length === 0 && r.failed[0].state === "failed", "crew: doom-loop capped → failed (terminates)");
+}
+
+// 9d. resumability: the event log fully reconstructs coordination state
+{
+  const repo2 = mkdtempSync(join(tmpdir(), "mantra-crew-"));
+  try {
+    const sink = new FileTaskLog(repo2);
+    const sup = newSup(sink);
+    const c = new Coordinator(sup, plan([{ title: "impl", role: "developer" }, { title: "qa", role: "qa" }]), exec(() => ({ ok: true, note: "done" })));
+    await c.runGoal("ship", "manager");
+    const restored = newSup();
+    restored.hydrate(new FileTaskLog(repo2).replay());
+    assert(restored.tasksInState("review").length === 2, "crew: state fully restored from event log after restart");
+  } finally {
+    rmSync(repo2, { recursive: true, force: true });
+  }
+}
+
+// 9e. heuristic planner default (Manager-less) → dev + qa tasks
+{
+  const tasks = await new HeuristicPlanner().decompose("add a contact form");
+  assert(tasks.length === 2 && tasks[0].role === "developer" && tasks[1].role === "qa", "heuristic planner → developer + qa");
+}
 
 console.log("\nAll smoke checks passed ✓");

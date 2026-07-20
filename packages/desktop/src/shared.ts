@@ -74,8 +74,10 @@ export interface MantraBridge {
   submitIntent(raw: string, source: IntentSource): Promise<IntentAck>;
   getFleet(): Promise<FleetSnapshot>;
   listProjects(): Promise<readonly ProjectRef[]>;
-  /** Kicks off a run; progress streams via onAgentEvent. Returns once accepted. */
+  /** Kicks off a single-agent run; progress streams via onAgentEvent. */
   runTask(req: RunRequest): Promise<IntentAck>;
+  /** Kicks off a crew run (Manager decomposes → Dev/QA → review); streams via onAgentEvent. */
+  runCrew(req: RunRequest): Promise<IntentAck>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
 }

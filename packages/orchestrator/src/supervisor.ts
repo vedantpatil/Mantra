@@ -1,9 +1,11 @@
 import {
   type AgentId,
   type ProjectId,
+  type Role,
   type TaskEvent,
   type TaskId,
   type TaskProjection,
+  type TaskState,
   isLeaseExpired,
   reduceTask,
 } from "@mantra/core";
@@ -49,13 +51,14 @@ export class Supervisor {
     return next;
   }
 
-  createTask(id: TaskId, title: string, createdBy: string): TaskProjection {
+  createTask(id: TaskId, title: string, createdBy: string, role?: Role): TaskProjection {
     return this.apply({
       type: "created",
       taskId: id,
       projectId: this.projectId,
       title,
       createdBy,
+      ...(role ? { role } : {}),
       at: this.now(),
     });
   }
@@ -68,8 +71,47 @@ export class Supervisor {
     return true;
   }
 
+  /** Record that work is underway (leased → doing). */
+  progress(id: TaskId, note: string): void {
+    this.apply({ type: "progress", taskId: id, note, at: this.now() });
+  }
+
+  /** Hand a finished task to the human review gate (→ review). */
+  toReview(id: TaskId): void {
+    this.apply({ type: "movedToReview", taskId: id, at: this.now() });
+  }
+
+  /** Approve at the review gate (review → done) — the human's call (FR-14). */
+  approve(id: TaskId): void {
+    this.apply({ type: "completed", taskId: id, at: this.now() });
+  }
+
   complete(id: TaskId): void {
     this.apply({ type: "completed", taskId: id, at: this.now() });
+  }
+
+  fail(id: TaskId, reason: string): void {
+    this.apply({ type: "failed", taskId: id, reason, at: this.now() });
+  }
+
+  /** Send a task back to the queue (e.g. QA rejected it); bumps the attempt count. */
+  requeue(id: TaskId): void {
+    this.apply({ type: "requeued", taskId: id, at: this.now() });
+  }
+
+  /** The oldest queued task, optionally filtered to a role — the scheduler's pull point. */
+  nextQueued(role?: Role): TaskProjection | undefined {
+    let best: TaskProjection | undefined;
+    for (const t of this.tasks.values()) {
+      if (t.state !== "queued") continue;
+      if (role && t.assigneeRole !== role) continue;
+      if (!best || t.updatedAt < best.updatedAt) best = t;
+    }
+    return best;
+  }
+
+  tasksInState(state: TaskState): readonly TaskProjection[] {
+    return [...this.tasks.values()].filter((t) => t.state === state);
   }
 
   /** Restart reconciliation (ADR-5): requeue every task whose lease has expired. */

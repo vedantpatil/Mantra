@@ -53,9 +53,17 @@ The operator drives Mantra from the desktop shell, not the terminal. Register pr
 Then launch the app and, in the command console (or by voice), type:
 
 ```
-run website: summarize the stack and main entry points     # read-only (dry-run)
-run! website: fix the typo in the footer                    # allow edits (worktree-isolated)
+run website: summarize the stack and main entry points     # one agent, read-only (dry-run)
+run! website: fix the typo in the footer                    # one agent, allow edits
+crew website: add a contact form                            # a crew: Manager → Dev/QA → your review
 ```
+
+A **crew** run decomposes the goal into tasks and drives them through the Supervisor's
+resumable task queue (Manager decomposes → Developer implements → QA verifies → human
+review). Coordination is deterministic and deadlock-free: handoffs go through the queue,
+never blocking waits; a per-task attempt cap prevents doom-loops; finished work lands in
+`review` and waits for your approval (no agent self-approves). The crew's state persists to
+`.mantra/state/`, so an interrupted crew resumes exactly where it stopped.
 
 Activity streams live into the console; the run is worktree-isolated, budget-capped, push-denied,
 and dual-graph-backed. Launch:
