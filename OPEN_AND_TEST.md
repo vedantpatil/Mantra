@@ -29,13 +29,12 @@ packages/desktop/release/Mantra-0.0.1-arm64.dmg
 
 ## 3. One-time setup for live runs
 
-- **API key**: Mantra reads `ANTHROPIC_API_KEY` from the environment. Launch it from a
-  terminal that has the key exported, so the packaged app inherits it:
-  ```bash
-  export ANTHROPIC_API_KEY=sk-...
-  open -a Mantra
+- **API key**: paste your key into `~/.mantra/config.json` once (no terminal needed):
+  ```json
+  { "anthropicApiKey": "sk-ant-..." }
   ```
-  (Or add the key to your shell profile / a launch agent so `open -a Mantra` always has it.)
+  Mantra reads it on launch, so a double-clicked app can run live. (An `ANTHROPIC_API_KEY`
+  exported in your shell still takes precedence if you prefer `open -a Mantra` from a terminal.)
 - **Projects**: `~/.mantra/projects.json` already maps `website → VPSTech/Website`. VPSTech
   appears as a card in the fleet. To add more, edit that file.
 - **Dual-graph**: auto-discovered at `~/.dual-graph/venv/bin/mcp-graph-server` and scoped to

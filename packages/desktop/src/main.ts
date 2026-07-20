@@ -9,7 +9,10 @@ import {
 import type { AgentEvent, IntentSource, ReviewItem, RunRequest } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
+import { loadApiKeyIntoEnv } from "./config.js";
 import { loadProjects, resolveTarget } from "./projects.js";
+
+loadApiKeyIntoEnv(); // make the API key available to Finder-launched (double-clicked) app
 
 /**
  * Electron main process — the trusted host. Owns the run pipeline and exposes only a
