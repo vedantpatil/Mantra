@@ -87,9 +87,12 @@ assert(rejected, "non-env ref rejected");
 // 8. project config + dual-graph resolution (FR-13a / ADR-11)
 const cfg = defaultProjectConfig("website");
 assert(cfg.dualGraph.enabled === true && cfg.dailyBudget === 2, "default config sane");
-assert(resolveDualGraph(cfg, false) === undefined, "no dual-graph command → undefined");
-const cfgWithCmd = { ...cfg, dualGraph: { enabled: true, command: "dual-graph-mcp", args: ["--stdio"] } };
-assert(resolveDualGraph(cfgWithCmd, false)?.command === "dual-graph-mcp", "dual-graph resolves when command set");
-assert(resolveDualGraph(cfgWithCmd, true) === undefined, "--no-graph disables dual-graph");
+const cfgWithCmd = { ...cfg, dualGraph: { enabled: true, command: "dual-graph-mcp" } };
+const dg = resolveDualGraph(cfgWithCmd, "/repo/x", false);
+assert(dg?.command === "dual-graph-mcp", "dual-graph resolves explicit command");
+assert(dg?.args?.[0] === "--stdio", "dual-graph default args --stdio");
+assert(dg?.env?.DG_DATA_DIR === "/repo/x/.dual-graph" && dg?.env?.DUAL_GRAPH_PROJECT_ROOT === "/repo/x", "per-repo env auto-derived");
+assert(resolveDualGraph(cfgWithCmd, "/repo/x", true) === undefined, "--no-graph disables dual-graph");
+assert(resolveDualGraph({ ...cfg, dualGraph: { enabled: false } }, "/repo/x", false) === undefined, "disabled config → no dual-graph");
 
 console.log("\nAll smoke checks passed ✓");

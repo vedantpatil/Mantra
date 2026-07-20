@@ -75,7 +75,14 @@ export async function runCommand(repoArg: string, task: string, flags: RunFlags)
   if (flags.dryRun) denyCapabilities.push(...WRITE_CAPS);
   else if (flags.noPush) denyCapabilities.push("gitPush");
 
-  const dualGraph = resolveDualGraph(config, flags.noGraph);
+  const dualGraph = resolveDualGraph(config, repoPath, flags.noGraph);
+  if (!dualGraph && !flags.noGraph && config.dualGraph.enabled) {
+    console.warn(
+      "⚠ dual-graph command not found — running without it (agents will grep, costing more tokens).\n" +
+      "  Set MANTRA_DUAL_GRAPH_COMMAND, or dualGraph.command in .mantra/config.json,\n" +
+      "  or install to ~/.dual-graph/venv/bin/mcp-graph-server.",
+    );
+  }
   const budget = Math.min(flags.budget, config.dailyBudget || flags.budget);
 
   const bus = new InProcessBus();

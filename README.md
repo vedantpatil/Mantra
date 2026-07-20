@@ -57,6 +57,11 @@ node packages/cli/dist/cli.js run ~/mantra-test/website "add a one-line comment 
 A/B the dual-graph token savings by running the same task with and without `--no-graph` and
 comparing the printed `cost $…`.
 
+The dual-graph MCP command is auto-discovered (no config needed for the standard install):
+explicit `dualGraph.command` in config → `MANTRA_DUAL_GRAPH_COMMAND` env →
+`~/.dual-graph/venv/bin/mcp-graph-server` → `mcp-graph-server` on PATH. The per-repo
+`DG_DATA_DIR`/`DUAL_GRAPH_PROJECT_ROOT` env is derived automatically from the repo path.
+
 ## Develop
 
 ```bash

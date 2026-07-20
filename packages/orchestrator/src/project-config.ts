@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { SCHEMA_VERSION } from "@mantra/core";
 import type { DualGraphConfig } from "./agent-runner.js";
@@ -56,12 +57,40 @@ export function saveProjectConfig(repoPath: string, config: ProjectConfig): void
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
 }
 
-/** Resolve the AgentRunner dual-graph config from project config, honoring an override to disable. */
-export function resolveDualGraph(config: ProjectConfig, disabled: boolean): DualGraphConfig | undefined {
-  if (disabled || !config.dualGraph.enabled || !config.dualGraph.command) return undefined;
+/**
+ * Locate the dual-graph MCP command without hardcoding a machine path (FR-13a):
+ *   1. explicit project config, 2. MANTRA_DUAL_GRAPH_COMMAND env,
+ *   3. the conventional install at ~/.dual-graph/venv/bin/mcp-graph-server,
+ *   4. `mcp-graph-server` if it's on PATH.
+ * Returns undefined when none is found (the run proceeds without a graph).
+ */
+export function discoverDualGraphCommand(configCommand?: string): string | undefined {
+  if (configCommand) return configCommand;
+  if (process.env.MANTRA_DUAL_GRAPH_COMMAND) return process.env.MANTRA_DUAL_GRAPH_COMMAND;
+  const conventional = join(homedir(), ".dual-graph", "venv", "bin", "mcp-graph-server");
+  if (existsSync(conventional)) return conventional;
+  return undefined; // may still be on PATH — caller can fall back to the bare name
+}
+
+/**
+ * Resolve the AgentRunner dual-graph config, auto-deriving the per-repo env
+ * (DG_DATA_DIR, DUAL_GRAPH_PROJECT_ROOT) so pointing at any repo just works.
+ */
+export function resolveDualGraph(
+  config: ProjectConfig,
+  repoPath: string,
+  disabled: boolean,
+): DualGraphConfig | undefined {
+  if (disabled || !config.dualGraph.enabled) return undefined;
+  const command = discoverDualGraphCommand(config.dualGraph.command);
+  if (!command) return undefined;
   return {
-    command: config.dualGraph.command,
-    args: config.dualGraph.args,
-    env: config.dualGraph.env,
+    command,
+    args: config.dualGraph.args ?? ["--stdio"],
+    env: {
+      DG_DATA_DIR: join(repoPath, ".dual-graph"),
+      DUAL_GRAPH_PROJECT_ROOT: repoPath,
+      ...config.dualGraph.env,
+    },
   };
 }
