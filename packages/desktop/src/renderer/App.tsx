@@ -43,24 +43,43 @@ export default function App(): JSX.Element {
   const [listening, setListening] = useState(false);
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<Line[]>([
-    { kind: "sys", text: "Mantra ready — type a /command or plain intent. ⌘K focuses the console; hold the mic to speak." },
+    { kind: "sys", text: "Mantra ready. Run a task: `run <project>: <what to do>` (read-only). Use `run!` to allow edits." },
+    { kind: "sys", text: "Also: /queue, /status, /help — or hold the mic to speak. ⌘K focuses the console." },
   ]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognition = useRef<{ start(): void; stop(): void } | null>(null);
 
   useEffect(() => {
     void window.mantra.getFleet().then(setFleet);
+    const unsub = window.mantra.onAgentEvent((e) => {
+      if (e.kind === "line") setLines((ls) => [...ls, { kind: "sys", text: e.text }]);
+      else if (e.kind === "done") {
+        const detail = e.diffStat ? `\n${e.diffStat}\nreview: git -C ${e.worktreePath} diff` : " · no file changes";
+        setLines((ls) => [...ls, { kind: "sys", text: `✓ done · cost $${e.costUsd.toFixed(4)} · ${e.stopReason}${detail}` }]);
+      } else setLines((ls) => [...ls, { kind: "err", text: `✗ ${e.message}` }]);
+    });
+    return unsub;
   }, []);
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [lines]);
+
+  /** `run <target>: <task>` (read-only) or `run! <target>: <task>` (edits allowed). */
+  function parseRun(text: string): { target: string; task: string; dryRun: boolean } | null {
+    const m = /^run(!?)\s+([^:]+):\s*(.+)$/i.exec(text);
+    if (!m) return null;
+    return { target: m[2].trim(), task: m[3].trim(), dryRun: m[1] !== "!" };
+  }
 
   async function submit(raw: string, source: IntentSource): Promise<void> {
     const text = raw.trim();
     if (!text) return;
     setLines((ls) => [...ls, { kind: "you", text }]);
     setInput("");
-    const ack = await window.mantra.submitIntent(text, source);
+    const run = parseRun(text);
+    const ack = run
+      ? await window.mantra.runTask(run)
+      : await window.mantra.submitIntent(text, source);
     setLines((ls) => [...ls, { kind: ack.ok ? "sys" : "err", text: ack.message }]);
   }
 
@@ -166,7 +185,7 @@ export default function App(): JSX.Element {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="/deploy CareerFlint   ·   what needs me?   ·   /help"
+              placeholder="run website: summarize the stack   ·   what needs me?   ·   /help"
               autoFocus
             />
           </form>

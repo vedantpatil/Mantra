@@ -41,7 +41,33 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   contract (FR-13a/ADR-11), runs the agent under the permission matrix + circuit breaker, then
   leaves the diff for review. Flags: `--role --model --budget --no-push --no-graph --dry-run --keep`.
 
-## First live run (safe)
+## Run from the app (primary surface)
+
+The operator drives Mantra from the desktop shell, not the terminal. Register projects in
+`~/.mantra/projects.json`:
+
+```json
+{ "projects": [ { "id": "website", "name": "VPSTech Website", "repoPath": "/abs/path/to/repo" } ] }
+```
+
+Then launch the app and, in the command console (or by voice), type:
+
+```
+run website: summarize the stack and main entry points     # read-only (dry-run)
+run! website: fix the typo in the footer                    # allow edits (worktree-isolated)
+```
+
+Activity streams live into the console; the run is worktree-isolated, budget-capped, push-denied,
+and dual-graph-backed. Launch:
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+npm run build && npm --prefix packages/desktop start
+```
+
+## Run from the CLI (same engine, for scripting/CI)
+
+The `@mantra/cli` calls the exact same pipeline as the app — useful for scripting or headless runs.
 
 ```bash
 git clone <your-repo> ~/mantra-test/website      # a throwaway clone, never your working copy

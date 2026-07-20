@@ -50,10 +50,34 @@ export interface FleetSnapshot {
   readonly budget: number;
 }
 
+/** A project the operator can run tasks against (from ~/.mantra/projects.json). */
+export interface ProjectRef {
+  readonly id: string;
+  readonly name: string;
+  readonly repoPath: string;
+}
+
+export interface RunRequest {
+  readonly target: string; // project id/name, or an absolute repo path
+  readonly task: string;
+  readonly dryRun: boolean;
+}
+
+/** Streamed from main → renderer during a run; the console renders these live. */
+export type AgentEvent =
+  | { readonly kind: "line"; readonly text: string }
+  | { readonly kind: "done"; readonly costUsd: number; readonly stopReason: string; readonly diffStat: string; readonly worktreePath: string }
+  | { readonly kind: "error"; readonly message: string };
+
 /** The safe surface exposed to the renderer via contextBridge. */
 export interface MantraBridge {
   submitIntent(raw: string, source: IntentSource): Promise<IntentAck>;
   getFleet(): Promise<FleetSnapshot>;
+  listProjects(): Promise<readonly ProjectRef[]>;
+  /** Kicks off a run; progress streams via onAgentEvent. Returns once accepted. */
+  runTask(req: RunRequest): Promise<IntentAck>;
+  /** Subscribe to live run events; returns an unsubscribe function. */
+  onAgentEvent(cb: (event: AgentEvent) => void): () => void;
 }
 
 declare global {
