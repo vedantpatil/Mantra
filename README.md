@@ -32,9 +32,12 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   (wraps the Claude Agent SDK), Effector, CircuitBreaker, Router, WorktreeManager, Bus,
   SqliteRegistry, FileTaskLog.
 - **`@mantra/desktop`** — the Electron shell (P1 UI): fleet view + Decisions queue + a working
-  **command console** (dual to voice) and a push-to-talk affordance. Main process is the trusted
-  host (contextIsolation on, a narrow typed IPC surface); the React renderer is sandboxed. Built
-  with esbuild. Run: `npm --prefix packages/desktop run build && npm --prefix packages/desktop start`.
+  **command console** (dual to voice) and a push-to-talk affordance. The fleet view reflects
+  **live agent status** — a project shows `busy` with its running agent(s) while a `run`/`crew`
+  executes (main streams a `fleet-changed` event as runs start/finish), `review` when tasks await
+  the gate, else `ready`. Main process is the trusted host (contextIsolation on, a narrow typed
+  IPC surface); the React renderer is sandboxed. Built with esbuild.
+  Run: `npm --prefix packages/desktop run build && npm --prefix packages/desktop start`.
 - **`@mantra/cli`** — `mantra run <repo> "<task>"`: the assembled spine for a single live agent.
   Loads `.mantra/config.json`, resolves the API key from env (ADR-3), creates a per-task git
   worktree (ADR-1), attaches the **dual-graph context MCP** with a retrieve-before-explore

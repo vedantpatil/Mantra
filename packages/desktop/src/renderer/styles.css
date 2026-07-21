@@ -63,6 +63,7 @@ body {
 .badge { width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; font-size: 9px; font-weight: 800; font-family: var(--mono); flex: none; }
 .badge.M { background: rgba(167,139,250,.16); color: var(--violet); }
 .badge.D { background: rgba(91,156,255,.16); color: var(--blue); }
+.badge.C { background: rgba(45,212,167,.16); color: var(--teal); }
 .badge.K { background: rgba(255,122,89,.16); color: var(--coral2); }
 .badge.Q { background: rgba(45,212,167,.16); color: var(--teal); }
 .badge.O { background: rgba(245,181,68,.16); color: var(--amber); }

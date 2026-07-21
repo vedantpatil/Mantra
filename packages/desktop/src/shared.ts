@@ -79,12 +79,22 @@ export interface ReviewItem {
   readonly repoPath: string;
 }
 
+/** A run currently executing against a project — what makes a project show as live in the fleet. */
+export interface ActiveRun {
+  readonly repoPath: string;
+  readonly kind: "run" | "crew";
+  readonly task: string;
+  readonly startedAt: number;
+}
+
 /** Streamed from main → renderer during a run; the console renders these live. */
 export type AgentEvent =
   | { readonly kind: "line"; readonly text: string }
   | { readonly kind: "done"; readonly costUsd: number; readonly stopReason: string; readonly diffStat: string; readonly worktreePath: string }
   | { readonly kind: "error"; readonly message: string }
-  | { readonly kind: "reviews-changed" };
+  | { readonly kind: "reviews-changed" }
+  /** Fleet-level state changed (a run started or ended) — the renderer should re-pull getFleet. */
+  | { readonly kind: "fleet-changed" };
 
 /** The safe surface exposed to the renderer via contextBridge. */
 export interface MantraBridge {

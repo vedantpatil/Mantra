@@ -6,7 +6,7 @@ import {
   type Confirmer, type CrewEvent, FileTaskLog, InProcessBus, type RunEvent, Supervisor,
   runAgentTask, runCrew,
 } from "@mantra/orchestrator";
-import type { AgentEvent, IntentSource, ReviewItem, RunRequest } from "./shared.js";
+import type { ActiveRun, AgentEvent, IntentSource, ReviewItem, RunRequest } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
 import { loadApiKeyIntoEnv } from "./config.js";
@@ -23,6 +23,27 @@ loadApiKeyIntoEnv(); // make the API key available to Finder-launched (double-cl
 
 /** Pending irreversible-op confirmations, keyed by request id, awaiting the operator's answer. */
 const pendingConfirms = new Map<string, (approved: boolean) => void>();
+
+/** Runs currently executing, keyed by a unique run id — this is what makes a project show live. */
+const activeRuns = new Map<string, ActiveRun>();
+
+/** Tell every window the fleet changed so it re-pulls getFleet (a run started or finished). */
+function broadcastFleetChanged(): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.webContents.isDestroyed()) w.webContents.send("agent:event", { kind: "fleet-changed" } satisfies AgentEvent);
+  }
+}
+
+/** Mark a run live and return a disposer that clears it — call the disposer in a finally. */
+function beginRun(run: ActiveRun): () => void {
+  const id = randomUUID();
+  activeRuns.set(id, run);
+  broadcastFleetChanged();
+  return () => {
+    activeRuns.delete(id);
+    broadcastFleetChanged();
+  };
+}
 
 /** A Confirmer that surfaces irreversible ops to the operator as an in-app dialog (ADR-2). */
 function makeUiConfirmer(wc: WebContents): Confirmer {
@@ -89,19 +110,24 @@ async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
     }
   };
 
-  const result = await runAgentTask({
-    repoPath, task: req.task,
-    role: "developer", model: "claude-haiku-4-5", budgetUsd: 1,
-    dryRun: req.dryRun, noPush: true, keepWorktree: req.dryRun ? false : true,
-    confirmer: makeUiConfirmer(wc),
-    onEvent,
-  });
+  const endRun = beginRun({ repoPath, kind: "run", task: req.task, startedAt: Date.now() });
+  try {
+    const result = await runAgentTask({
+      repoPath, task: req.task,
+      role: "developer", model: "claude-haiku-4-5", budgetUsd: 1,
+      dryRun: req.dryRun, noPush: true, keepWorktree: req.dryRun ? false : true,
+      confirmer: makeUiConfirmer(wc),
+      onEvent,
+    });
 
-  if (!result.ok) {
-    send({ kind: "error", message: result.error ?? "run failed" });
-    return;
+    if (!result.ok) {
+      send({ kind: "error", message: result.error ?? "run failed" });
+      return;
+    }
+    send({ kind: "done", costUsd: result.costUsd, stopReason: result.tripped ?? result.stopReason, diffStat: result.diffStat, worktreePath: result.worktreePath });
+  } finally {
+    endRun();
   }
-  send({ kind: "done", costUsd: result.costUsd, stopReason: result.tripped ?? result.stopReason, diffStat: result.diffStat, worktreePath: result.worktreePath });
 }
 
 async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
@@ -124,22 +150,27 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
     send({ kind: "line", text });
   };
 
-  const result = await runCrew({
-    repoPath, goal: req.task,
-    model: "claude-haiku-4-5", budgetUsd: 2, noPush: true,
-    confirmer: makeUiConfirmer(wc),
-    onCrewEvent,
-  });
-  if (!result.ok) {
-    send({ kind: "error", message: result.error ?? "crew run failed" });
-    return;
+  const endRun = beginRun({ repoPath, kind: "crew", task: req.task, startedAt: Date.now() });
+  try {
+    const result = await runCrew({
+      repoPath, goal: req.task,
+      model: "claude-haiku-4-5", budgetUsd: 2, noPush: true,
+      confirmer: makeUiConfirmer(wc),
+      onCrewEvent,
+    });
+    if (!result.ok) {
+      send({ kind: "error", message: result.error ?? "crew run failed" });
+      return;
+    }
+    send({ kind: "line", text: `▸ crew done · ${result.reviewTitles.length} in review, ${result.failedTitles.length} failed. Approve in the Decisions queue.` });
+    send({ kind: "reviews-changed" });
+  } finally {
+    endRun();
   }
-  send({ kind: "line", text: `▸ crew done · ${result.reviewTitles.length} in review, ${result.failedTitles.length} failed. Approve in the Decisions queue.` });
-  send({ kind: "reviews-changed" });
 }
 
 void app.whenReady().then(() => {
-  ipcMain.handle("fleet:get", () => buildFleet(listReviews()));
+  ipcMain.handle("fleet:get", () => buildFleet(listReviews(), [...activeRuns.values()]));
   ipcMain.handle("projects:list", () => loadProjects());
   ipcMain.handle("intent:submit", (_e, payload: { raw: string; source: IntentSource }) =>
     routeIntent(payload.raw, payload.source),

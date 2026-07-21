@@ -24,8 +24,8 @@ function Project({ p }: { p: FleetProject }): JSX.Element {
         <span className="lab">{p.stage}</span>
       </div>
       <div className="crew">
-        {p.agents.map((a) => (
-          <div className="agent" key={a.role}>
+        {p.agents.map((a, i) => (
+          <div className="agent" key={`${a.role}-${a.status}-${i}`}>
             <span className={`badge ${a.badge}`}>{a.badge}</span>
             <span className="an">{a.role}</span>
             <span className="task">{a.task}</span>
@@ -54,13 +54,17 @@ export default function App(): JSX.Element {
   const refreshReviews = (): void => {
     void window.mantra.listReviews().then(setReviews);
   };
+  const refreshFleet = (): void => {
+    void window.mantra.getFleet().then(setFleet);
+  };
 
   useEffect(() => {
-    void window.mantra.getFleet().then(setFleet);
+    refreshFleet();
     refreshReviews();
     const unsub = window.mantra.onAgentEvent((e) => {
       if (e.kind === "line") setLines((ls) => [...ls, { kind: "sys", text: e.text }]);
-      else if (e.kind === "reviews-changed") refreshReviews();
+      else if (e.kind === "fleet-changed") refreshFleet();
+      else if (e.kind === "reviews-changed") { refreshReviews(); refreshFleet(); }
       else if (e.kind === "done") {
         const detail = e.diffStat ? `\n${e.diffStat}\nreview: git -C ${e.worktreePath} diff` : " · no file changes";
         setLines((ls) => [...ls, { kind: "sys", text: `✓ done · cost $${e.costUsd.toFixed(4)} · ${e.stopReason}${detail}` }]);
@@ -81,6 +85,7 @@ export default function App(): JSX.Element {
     const ack = await window.mantra.resolveReview(item.repoPath, item.id, approve);
     setLines((ls) => [...ls, { kind: "sys", text: `${approve ? "✓ approved" : "↩ sent back"}: ${item.title} — ${ack.message}` }]);
     refreshReviews();
+    refreshFleet();
   }
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
