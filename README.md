@@ -64,6 +64,13 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   Ops never auto-remediates anything irreversible — it *escalates* to the operator (human-gated,
   ADR-2). Every transition is written to the append-only **audit trail** (`.mantra/state/audit.jsonl`,
   FR-24). Flags: `--once --interval <sec>`.
+  `mantra vault <set|get|list|rm>` manages the **P5 secrets vault** (`FileVault`): secrets are sealed
+  at rest with **AES-256-GCM** under a key derived (scrypt) from `MANTRA_VAULT_KEY` — the passphrase
+  never touches disk, GCM's auth tag makes a wrong key or a tampered file fail loudly, and `set` reads
+  the value from stdin (never argv, so it stays out of shell history). Reference a stored secret as
+  `vault://<key>` anywhere a ref is expected (`apiKeyRef`, a deploy `secretRef`); the default
+  `CompositeSecretProvider` routes `env://` → env and `vault://` → the vault, a drop-in for the old
+  env-only provider (ADR-3).
 
 ## Install as a Mac app
 

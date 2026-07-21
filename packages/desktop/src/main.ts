@@ -4,9 +4,9 @@ import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { projectId, taskId as makeTaskId } from "@mantra/core";
 import {
-  type AuditEvent, type Confirmer, type CrewEvent, Effector, EnvSecretProvider, FileAuditLog, FileTaskLog,
-  GhGitHost, InProcessBus, OpsMonitor, type RunEvent, type ShipEvent, Supervisor, httpProbe, isGitRepo,
-  liveShipEffects, loadProjectConfig, runAgentTask, runCrew, runShip,
+  type AuditEvent, type Confirmer, type CrewEvent, Effector, FileAuditLog, FileTaskLog,
+  GhGitHost, InProcessBus, OpsMonitor, type RunEvent, type ShipEvent, Supervisor, defaultSecretProvider,
+  httpProbe, isGitRepo, liveShipEffects, loadProjectConfig, runAgentTask, runCrew, runShip,
 } from "@mantra/orchestrator";
 import type {
   ActiveRun, AgentEvent, AuditEntry, IntentSource, OpsIncident, ReviewItem, RunRequest, ShipRequest,
@@ -214,7 +214,7 @@ async function startShip(req: ShipRequest, wc: WebContents): Promise<void> {
   };
 
   // Push + deploy route through the Effector (permission matrix + the in-app confirm dialog).
-  const effector = new Effector(new EnvSecretProvider(), makeUiConfirmer(wc), liveShipEffects());
+  const effector = new Effector(defaultSecretProvider(), makeUiConfirmer(wc), liveShipEffects());
   const endRun = beginRun({ repoPath: req.repoPath, kind: "ship", task: req.title, startedAt: Date.now() });
   try {
     send({ kind: "line", text: `▸ shipping ${branch} · "${req.title}"` });

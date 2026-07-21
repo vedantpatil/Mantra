@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip, OpsMonitor, MemoryAuditLog } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip, OpsMonitor, MemoryAuditLog, FileVault, VaultSecretProvider, CompositeSecretProvider, vaultRef } from "@mantra/orchestrator";
+import { writeFileSync as _writeFileSync, readFileSync as _readFileSync } from "node:fs";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -303,6 +304,59 @@ const newSup = (sink) => new Supervisor(projectId("crew"), new InProcessBus(), (
     const evs = await drive(mon, 2);
     assert(count(evs, "probe-error") === 2 && count(evs, "escalated") === 1, "ops: probe error → critical → escalates");
   }
+}
+
+// 13. Secrets vault (P5) — AES-256-GCM at rest, passphrase-derived key, scheme routing.
+{
+  const dir = mkdtempSync(join(tmpdir(), "vault-"));
+  const file = join(dir, "vault.json");
+  const pass = "correct horse battery staple";
+  const v = new FileVault(file, () => pass);
+
+  // round-trip: encrypt on set, decrypt on get.
+  v.set("API", "sk-secret-123");
+  assert(v.get("API") === "sk-secret-123", "vault: set→get round-trips");
+
+  // at rest it's ciphertext — the plaintext never appears in the file.
+  const onDisk = _readFileSync(file, "utf8");
+  assert(!onDisk.includes("sk-secret-123") && onDisk.includes('"ct"'), "vault: value is encrypted at rest");
+
+  // list exposes key NAMES only (safe to print); has works without decrypting.
+  assert(v.list().join() === "API" && v.has("API") && !v.has("NOPE"), "vault: list/has expose names only");
+
+  // wrong passphrase fails loudly (GCM auth), never returns garbage.
+  const wrong = new FileVault(file, () => "nope");
+  let threw = false;
+  try { wrong.get("API"); } catch { threw = true; }
+  assert(threw, "vault: wrong passphrase → decrypt fails (no garbage)");
+
+  // tamper detection: flip a ciphertext byte → auth tag rejects it.
+  const doc = JSON.parse(_readFileSync(file, "utf8"));
+  const ct = doc.entries.API.ct;
+  doc.entries.API.ct = (ct[0] === "0" ? "1" : "0") + ct.slice(1);
+  _writeFileSync(file, JSON.stringify(doc));
+  const tampered = new FileVault(file, () => pass);
+  let caught = false;
+  try { tampered.get("API"); } catch { caught = true; }
+  assert(caught, "vault: tampered ciphertext → rejected");
+
+  // delete removes it.
+  const v2 = new FileVault(file, () => pass);
+  assert(v2.delete("API") && !v2.has("API") && !v2.delete("API"), "vault: delete removes the entry");
+
+  // provider routing: env:// → env, vault:// → vault, unknown → error.
+  const file2 = join(dir, "v2.json");
+  const fv = new FileVault(file2, () => pass);
+  fv.set("TOK", "tok-xyz");
+  const provider = new CompositeSecretProvider(new EnvSecretProvider(), new VaultSecretProvider(() => new FileVault(file2, () => pass)));
+  process.env.SMOKE_ENV_SECRET = "env-val";
+  assert(await provider.resolve(envRef("SMOKE_ENV_SECRET")) === "env-val", "vault: composite routes env:// to env");
+  assert(await provider.resolve(vaultRef("TOK")) === "tok-xyz", "vault: composite routes vault:// to vault");
+  let badScheme = false;
+  try { await provider.resolve({ toString: () => "s3://x" }); } catch { badScheme = true; }
+  assert(badScheme, "vault: unknown scheme rejected");
+
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log("\nAll smoke checks passed ✓");

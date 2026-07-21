@@ -5,7 +5,8 @@ import { AgentRunner, type AgentSpec } from "./agent-runner.js";
 import { CircuitBreaker, type Pricing } from "./breaker.js";
 import type { Confirmer } from "./effector.js";
 import { InProcessBus } from "./bus.js";
-import { EnvSecretProvider, envRef } from "./secrets-env.js";
+import { envRef } from "./secrets-env.js";
+import { defaultSecretProvider } from "./vault.js";
 import { loadProjectConfig, resolveDualGraph } from "./project-config.js";
 import { WorktreeManager } from "./worktree.js";
 
@@ -80,7 +81,7 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
 
   const config = loadProjectConfig(opts.repoPath, name);
   const apiKeyRef = config.apiKeyRef ? secretRef(config.apiKeyRef) : envRef("ANTHROPIC_API_KEY");
-  const secrets = new EnvSecretProvider();
+  const secrets = defaultSecretProvider();
   try {
     await secrets.resolve(apiKeyRef);
   } catch {

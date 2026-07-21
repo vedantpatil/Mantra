@@ -5,6 +5,7 @@ import { crewCommand, type CrewFlags } from "./crew.js";
 import { opsCommand, type OpsFlags } from "./ops.js";
 import { runCommand, type RunFlags } from "./run.js";
 import { shipCommand, type ShipFlags } from "./ship.js";
+import { vaultCommand } from "./vault.js";
 
 const ROLES: readonly Role[] = ["manager", "developer", "qa", "devops", "marketer", "ops"];
 
@@ -15,6 +16,7 @@ Usage:
   mantra crew <repo-path> "<goal>"  [options]   decompose a goal + drive the crew to review
   mantra ship <repo-path> "<title>" [options]   push → PR → CI gate → auto-merge → guarded deploy
   mantra ops  <repo-path>           [options]   monitor configured health signals → triage → escalate
+  mantra vault <set|get|list|rm> [key]          manage the encrypted secrets vault (unlock: MANTRA_VAULT_KEY)
 
 Options:
   --role <role>     (run only) crew role (default: developer) — ${ROLES.join(" | ")}
@@ -62,10 +64,14 @@ async function main(): Promise<number> {
   });
 
   const [command, repo, task] = positionals;
-  const KNOWN = new Set(["run", "crew", "ship", "ops"]);
+  const KNOWN = new Set(["run", "crew", "ship", "ops", "vault"]);
   if (values.help || !KNOWN.has(command)) {
     console.log(USAGE);
     return values.help ? 0 : command ? 1 : 0;
+  }
+
+  if (command === "vault") {
+    return vaultCommand(repo, task); // positionals: <sub> [key]
   }
 
   if (command === "ops") {

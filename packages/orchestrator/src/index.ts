@@ -20,3 +20,4 @@ export * from "./ship.js";
 export * from "./git-host.js";
 export * from "./audit.js";
 export * from "./ops.js";
+export * from "./vault.js";

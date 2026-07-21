@@ -6,7 +6,8 @@ import { type CrewEvent, Coordinator, type Planner } from "./coordinator.js";
 import type { Confirmer } from "./effector.js";
 import { loadProjectConfig } from "./project-config.js";
 import { type RunEvent, isGitRepo } from "./run-task.js";
-import { EnvSecretProvider, envRef } from "./secrets-env.js";
+import { envRef } from "./secrets-env.js";
+import { defaultSecretProvider } from "./vault.js";
 import { FileTaskLog } from "./task-log.js";
 import { Supervisor } from "./supervisor.js";
 import { InProcessBus } from "./bus.js";
@@ -45,7 +46,7 @@ export async function runCrew(opts: RunCrewOptions): Promise<RunCrewResult> {
   const config = loadProjectConfig(opts.repoPath, name);
   const apiKeyRef = config.apiKeyRef ? secretRef(config.apiKeyRef) : envRef("ANTHROPIC_API_KEY");
   try {
-    await new EnvSecretProvider().resolve(apiKeyRef);
+    await defaultSecretProvider().resolve(apiKeyRef);
   } catch {
     return { ok: false, reviewTitles: [], failedTitles: [], error: "ANTHROPIC_API_KEY is not set" };
   }

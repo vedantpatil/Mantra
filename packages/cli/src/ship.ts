@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import {
-  Effector, EnvSecretProvider, GhGitHost, type ShipEvent, isGitRepo, liveShipEffects, runShip,
+  Effector, GhGitHost, type ShipEvent, defaultSecretProvider, isGitRepo, liveShipEffects, runShip,
 } from "@mantra/orchestrator";
 import { DenyConfirmer, StdinConfirmer } from "./confirmers.js";
 
@@ -29,7 +29,7 @@ export async function shipCommand(repoArg: string, title: string, flags: ShipFla
 
   // Deploy + push route through the Effector (permission matrix + confirm); dry-run auto-denies.
   const effector = new Effector(
-    new EnvSecretProvider(),
+    defaultSecretProvider(),
     flags.dryRun ? new DenyConfirmer() : new StdinConfirmer(),
     liveShipEffects(),
   );
