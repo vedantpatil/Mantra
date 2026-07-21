@@ -16,3 +16,5 @@ export * from "./coordinator.js";
 export * from "./agent-executor.js";
 export * from "./agent-planner.js";
 export * from "./run-crew.js";
+export * from "./ship.js";
+export * from "./git-host.js";

@@ -50,10 +50,22 @@ export interface EffectorResult {
   readonly detail: string;
 }
 
+/**
+ * Performs the real side effect for an action kind, INSIDE the trusted boundary and only
+ * after the permission + human gates have passed. Receives the resolved secret value (if any);
+ * that value must never be returned to or serialized for an agent. Returns a short detail line.
+ */
+export type SideEffect = (action: ActionIntent, secret?: string) => Promise<string>;
+export type SideEffects = Partial<Record<ActionKind, SideEffect>>;
+
 export class Effector {
   constructor(
     private readonly secrets: SecretProvider,
     private readonly confirmer: Confirmer,
+    /** Real executors per action kind. Kinds without one are gated-then-stubbed (the control
+     * path runs, no side effect) — this is intentional for agent-driven runs, which never
+     * really push/deploy. The operator-driven Shipper wires live effects (see git-host.ts). */
+    private readonly effects: SideEffects = {},
   ) {}
 
   async execute(action: ActionIntent): Promise<Result<EffectorResult>> {
@@ -68,10 +80,15 @@ export class Effector {
 
     // Secret value is resolved HERE and never leaves this scope.
     const secret = action.secretRef ? await this.secrets.resolve(action.secretRef) : undefined;
-    void secret; // handed to the side-effect impl below, never to an agent.
 
-    // TODO(P1+): perform the real side effect (git push / ssh deploy / migration / rm)
-    // with idempotency keys (ADR-10). Stubbed so the control path is exercised now.
-    return Ok({ kind: action.kind, detail: `executed ${action.kind} for ${action.projectId}` });
+    const perform = this.effects[action.kind];
+    try {
+      const detail = perform
+        ? await perform(action, secret)
+        : `executed ${action.kind} for ${action.projectId}`; // no live effector wired → stub
+      return Ok({ kind: action.kind, detail });
+    } catch (e) {
+      return Err(e instanceof Error ? e : new Error(String(e)));
+    }
   }
 }

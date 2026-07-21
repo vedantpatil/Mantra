@@ -46,6 +46,11 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   `mantra crew <repo> "<goal>"` drives the full P2 crew instead: the Manager decomposes the goal,
   Dev/QA execute each task to the human review gate, state persists under `.mantra/state/` (so it's
   resumable), and the run is always push-denied. Same `runCrew()` pipeline the desktop console uses.
+  `mantra ship <repo> "<title>"` runs the **P4 ship pipeline** (`runShip()`): push → open PR →
+  **gate on CI** → auto-merge **only on green** (ADR-8: CI, not the agent, decides) → optional
+  `--deploy <env>` behind the confirm gate (deploy is always human-confirmed, ADR-2). Push + deploy
+  route through the trusted Effector (permission matrix + `gh`/`git` drivers); the gate logic is
+  deterministic and proven offline with fakes. Flags: `--base --branch --deploy --deploy-cmd --no-merge`.
 
 ## Install as a Mac app
 

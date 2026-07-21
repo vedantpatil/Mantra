@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -179,6 +179,67 @@ const newSup = (sink) => new Supervisor(projectId("crew"), new InProcessBus(), (
   assert(parseTaskList("no json here").length === 0, "no JSON → empty (triggers fallback)");
   assert(parseTaskList("[not valid json").length === 0, "malformed JSON → empty");
   assert(parseTaskList('[{"role":"qa"}]').length === 0, "item without title dropped");
+}
+
+// 11. Ship pipeline gates (P4) — deterministic core proven with a fake GitHost + confirmer.
+{
+  // A scripted GitHost: ciStatus walks a given sequence; the last value repeats.
+  const fakeHost = (ciSeq) => {
+    let i = 0, merged = false;
+    return {
+      merged: () => merged,
+      openPr: async () => ({ number: 7, url: "https://example/pr/7" }),
+      ciStatus: async () => ciSeq[Math.min(i++, ciSeq.length - 1)],
+      merge: async () => { merged = true; },
+    };
+  };
+  const confirmer = (ok) => ({ confirm: async () => ok });
+  const effector = (ok) => new Effector(new EnvSecretProvider(), confirmer(ok));
+  const fast = { intervalMs: 0, maxAttempts: 4 };
+  const baseOpts = { repoPath: "/tmp/x", branch: "feat", title: "t", role: "devops" };
+
+  // green after one pending → merges.
+  {
+    const host = fakeHost(["pending", "success"]);
+    const r = await runShip({ ...baseOpts, host, effector: effector(true), ci: fast });
+    assert(r.ok && r.stage === "done" && r.merged && host.merged(), "ship: CI green → auto-merged");
+  }
+  // red CI → never merges (the gate).
+  {
+    const host = fakeHost(["pending", "failure"]);
+    const r = await runShip({ ...baseOpts, host, effector: effector(true), ci: fast });
+    assert(!r.ok && r.stage === "ci" && !r.merged && !host.merged(), "ship: CI red → NOT merged (gate holds)");
+  }
+  // stays pending → gives up without merging.
+  {
+    const host = fakeHost(["pending"]);
+    const r = await runShip({ ...baseOpts, host, effector: effector(true), ci: fast });
+    assert(!r.ok && r.stage === "ci" && !host.merged(), "ship: CI never green → gives up, no merge");
+  }
+  // autoMerge false + green → stops at a green PR, unmerged but ok.
+  {
+    const host = fakeHost(["success"]);
+    const r = await runShip({ ...baseOpts, host, effector: effector(true), autoMerge: false, ci: fast });
+    assert(r.ok && r.stage === "merge" && !r.merged && !host.merged(), "ship: --no-merge → green PR left for manual merge");
+  }
+  // deploy requested + confirm APPROVED → deploys after merge.
+  {
+    const host = fakeHost(["success"]);
+    const r = await runShip({ ...baseOpts, host, effector: effector(true), deploy: { env: "staging" }, ci: fast });
+    assert(r.ok && r.stage === "done" && r.merged && r.deployed, "ship: deploy confirmed → merged + deployed");
+  }
+  // deploy requested + confirm DECLINED → merged but deploy aborted (human gate, ADR-2).
+  {
+    const host = fakeHost(["success"]);
+    const r = await runShip({ ...baseOpts, host, effector: effector(false), deploy: { env: "staging" }, ci: fast });
+    assert(!r.ok && r.stage === "deploy" && r.merged && !r.deployed, "ship: deploy declined → merged, NOT deployed");
+  }
+  // role without gitPush grant → aborts at push before any PR (permission matrix, ADR-4).
+  {
+    const host = fakeHost(["success"]);
+    const r = await runShip({ ...baseOpts, role: "marketer", host, effector: effector(true), ci: fast });
+    assert(!r.ok && r.stage === "push" && !host.merged(), "ship: role denied gitPush → aborts at push");
+  }
 }
 
 console.log("\nAll smoke checks passed ✓");
