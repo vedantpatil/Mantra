@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AuditEntry, ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, OpsIncident, ReviewItem } from "../shared.js";
+import type { AuditEntry, ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, OpsIncident, ReviewItem, SettingsInfo } from "../shared.js";
 
 interface Line {
   readonly kind: "you" | "sys" | "err";
@@ -43,6 +43,11 @@ export default function App(): JSX.Element {
   const [incidents, setIncidents] = useState<readonly OpsIncident[]>([]);
   const [audit, setAudit] = useState<readonly AuditEntry[]>([]);
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [settings, setSettings] = useState<SettingsInfo | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [projName, setProjName] = useState("");
+  const [projPath, setProjPath] = useState("");
   const [mode, setMode] = useState<IntentSource>("console");
   const [listening, setListening] = useState(false);
   const [input, setInput] = useState("");
@@ -66,11 +71,16 @@ export default function App(): JSX.Element {
     void window.mantra.listAudit(12).then(setAudit);
   };
 
+  const refreshSettings = (): Promise<SettingsInfo> =>
+    window.mantra.getSettings().then((s) => { setSettings(s); return s; });
+
   useEffect(() => {
     refreshFleet();
     refreshReviews();
     refreshIncidents();
     refreshAudit();
+    // Open Setup automatically on a fresh machine (no key + no projects) so the app is UI-only.
+    void refreshSettings().then((s) => { if (!s.apiKeySet && s.projects.length === 0) setShowSettings(true); });
     const unsub = window.mantra.onAgentEvent((e) => {
       if (e.kind === "line") setLines((ls) => [...ls, { kind: "sys", text: e.text }]);
       else if (e.kind === "fleet-changed") { refreshFleet(); refreshAudit(); }
@@ -102,6 +112,27 @@ export default function App(): JSX.Element {
   async function shipReview(item: ReviewItem): Promise<void> {
     const ack = await window.mantra.shipReview({ repoPath: item.repoPath, title: item.title });
     setLines((ls) => [...ls, { kind: ack.ok ? "sys" : "err", text: `🚢 ${ack.message}` }]);
+  }
+
+  async function onSaveApiKey(): Promise<void> {
+    if (!apiKeyInput.trim()) return;
+    setSettings(await window.mantra.saveApiKey(apiKeyInput.trim()));
+    setApiKeyInput("");
+    setLines((ls) => [...ls, { kind: "sys", text: "✓ API key saved — live runs are ready." }]);
+  }
+  async function onPickFolder(): Promise<void> {
+    const p = await window.mantra.pickFolder();
+    if (p) { setProjPath(p); if (!projName.trim()) setProjName(p.split("/").filter(Boolean).pop() ?? ""); }
+  }
+  async function onAddProject(): Promise<void> {
+    if (!projName.trim() || !projPath.trim()) return;
+    setSettings(await window.mantra.addProject(projName.trim(), projPath.trim()));
+    setProjName(""); setProjPath("");
+    refreshFleet();
+  }
+  async function onRemoveProject(id: string): Promise<void> {
+    setSettings(await window.mantra.removeProject(id));
+    refreshFleet();
   }
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
@@ -180,6 +211,53 @@ export default function App(): JSX.Element {
           </div>
         </div>
       )}
+      {showSettings && (
+        <div className="modal-scrim" onClick={() => setShowSettings(false)}>
+          <div className="modal settings" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-h">⚙ Setup</div>
+            <div className="modal-b">
+              <div className="set-sec">
+                <div className="set-label">Anthropic API key</div>
+                <div className="set-status">
+                  {settings?.apiKeySet
+                    ? <>✓ set <code>{settings.apiKeyMasked}</code>{settings.apiKeySource === "env" ? " (from shell env)" : ""}</>
+                    : <span className="warn-txt">not set — required for live runs</span>}
+                </div>
+                <div className="set-row">
+                  <input
+                    className="set-input" type="password" placeholder="sk-ant-…"
+                    value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void onSaveApiKey(); }}
+                  />
+                  <button className="db primary" onClick={() => void onSaveApiKey()}>Save</button>
+                </div>
+              </div>
+
+              <div className="set-sec">
+                <div className="set-label">Projects</div>
+                {settings && settings.projects.length > 0 ? (
+                  settings.projects.map((p) => (
+                    <div className="set-proj" key={p.id}>
+                      <div className="set-proj-t">{p.name}</div>
+                      <div className="set-proj-p">{p.repoPath}</div>
+                      <button className="db ghost" onClick={() => void onRemoveProject(p.id)}>Remove</button>
+                    </div>
+                  ))
+                ) : <div className="set-status">No projects yet.</div>}
+                <div className="set-row">
+                  <input className="set-input sm" placeholder="Name (e.g. VPSTech Website)" value={projName} onChange={(e) => setProjName(e.target.value)} />
+                  <button className="db" onClick={() => void onPickFolder()}>{projPath ? "✓ folder" : "Choose folder…"}</button>
+                  <button className="db primary" onClick={() => void onAddProject()} disabled={!projName.trim() || !projPath.trim()}>Add</button>
+                </div>
+                {projPath && <div className="set-proj-p" style={{ marginTop: 4 }}>{projPath}</div>}
+              </div>
+            </div>
+            <div className="modal-btns">
+              <button className="db primary" onClick={() => setShowSettings(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <span className="logo no-drag" />
         <span className="brand">Mantra</span>
@@ -187,6 +265,9 @@ export default function App(): JSX.Element {
         <span className="spacer" />
         <span className="spend no-drag">${fleet ? fleet.spendToday.toFixed(2) : "0.00"} / ${fleet?.budget ?? 30}</span>
         <span className="pill no-drag"><span className="dot" />healthy</span>
+        <button className="gear no-drag" title="Setup" onClick={() => setShowSettings(true)}>
+          ⚙{settings && !settings.apiKeySet && <span className="gear-dot" />}
+        </button>
       </header>
 
       <div className="body">
@@ -201,14 +282,13 @@ export default function App(): JSX.Element {
           </div>
           {fleet && fleet.projects.length === 0 ? (
             <div className="pcard" style={{ gridColumn: "1 / -1" }}>
-              <div className="pcard-h"><span className="hp idle" /><span className="nm">No projects registered</span></div>
-              <div className="s" style={{ color: "var(--muted)", fontSize: 12.5 }}>
-                Add projects to <code>~/.mantra/projects.json</code>, e.g.
-                <pre style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--violet)", whiteSpace: "pre-wrap", marginTop: 6 }}>{`{ "projects": [
-  { "id": "website", "name": "VPSTech Website",
-    "repoPath": "/Users/you/Projects/VPSTech/Website" } ] }`}</pre>
-                Then run from the console: <code>crew website: &lt;goal&gt;</code>
+              <div className="pcard-h"><span className="hp idle" /><span className="nm">No projects yet</span></div>
+              <div className="s" style={{ color: "var(--muted)", fontSize: 12.5, marginBottom: 10 }}>
+                {settings?.apiKeySet
+                  ? "Add a project to start running crews from the console."
+                  : "Set your Anthropic API key and add a project — all from Setup, no files to edit."}
               </div>
+              <button className="db primary" onClick={() => setShowSettings(true)}>⚙ Open Setup</button>
             </div>
           ) : (
             <div className="fleet">

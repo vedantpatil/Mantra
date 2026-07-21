@@ -32,7 +32,10 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   (wraps the Claude Agent SDK), Effector, CircuitBreaker, Router, WorktreeManager, Bus,
   SqliteRegistry, FileTaskLog.
 - **`@mantra/desktop`** — the Electron shell (P1 UI): fleet view + Decisions queue + a working
-  **command console** (dual to voice) and a push-to-talk affordance. The fleet view reflects
+  **command console** (dual to voice) and a push-to-talk affordance. It is **set up entirely from the
+  UI** — a ⚙ Setup screen (auto-opened on a fresh machine) takes the Anthropic API key (saved to
+  `~/.mantra/config.json` and applied live, so a double-clicked app can run without a shell env) and
+  adds/removes projects via a native folder picker (no hand-edited `projects.json`). The fleet view reflects
   **live agent status** — a project shows `busy` with its running agent(s) while a `run`/`crew`/`ship`
   executes (main streams a `fleet-changed` event as runs start/finish), `review` when tasks await
   the gate, else `ready` — and `blk` (blocked) when an **Ops incident** is open. Each review card

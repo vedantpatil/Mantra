@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AgentEvent, AuditEntry, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, OpsIncident, ProjectRef, ReviewItem, RunRequest, ShipRequest } from "./shared.js";
+import type { AgentEvent, AuditEntry, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, OpsIncident, ProjectRef, ReviewItem, RunRequest, SettingsInfo, ShipRequest } from "./shared.js";
 
 /** Exposes only the typed `MantraBridge` on `window.mantra` — no raw ipcRenderer, no Node. */
 contextBridge.exposeInMainWorld("mantra", {
@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld("mantra", {
   listIncidents: (): Promise<readonly OpsIncident[]> => ipcRenderer.invoke("ops:list"),
   listAudit: (limit?: number): Promise<readonly AuditEntry[]> => ipcRenderer.invoke("audit:list", limit),
   normalizeVoice: (text: string): Promise<string> => ipcRenderer.invoke("voice:normalize", text),
+  getSettings: (): Promise<SettingsInfo> => ipcRenderer.invoke("settings:get"),
+  saveApiKey: (key: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setApiKey", key),
+  pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("settings:pickFolder"),
+  addProject: (name: string, repoPath: string): Promise<SettingsInfo> => ipcRenderer.invoke("projects:add", name, repoPath),
+  removeProject: (id: string): Promise<SettingsInfo> => ipcRenderer.invoke("projects:remove", id),
   onAgentEvent: (cb: (event: AgentEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AgentEvent): void => cb(payload);
     ipcRenderer.on("agent:event", listener);

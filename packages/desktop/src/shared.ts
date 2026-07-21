@@ -57,6 +57,14 @@ export interface ProjectRef {
   readonly repoPath: string;
 }
 
+/** Everything the in-app Settings screen needs — so the app is set up entirely from the UI. */
+export interface SettingsInfo {
+  readonly apiKeySet: boolean;
+  readonly apiKeySource: "env" | "config" | "none";
+  readonly apiKeyMasked?: string;
+  readonly projects: readonly ProjectRef[];
+}
+
 export interface RunRequest {
   readonly target: string; // project id/name, or an absolute repo path
   readonly task: string;
@@ -144,6 +152,16 @@ export interface MantraBridge {
   listAudit(limit?: number): Promise<readonly AuditEntry[]>;
   /** Normalize a raw voice transcript into the console command grammar (voice ⇔ console parity). */
   normalizeVoice(text: string): Promise<string>;
+  /** Current setup state (API key + projects) for the Settings screen. */
+  getSettings(): Promise<SettingsInfo>;
+  /** Save the Anthropic API key (persists to config.json + applies live). */
+  saveApiKey(key: string): Promise<SettingsInfo>;
+  /** Open a native folder picker; returns the chosen absolute path (or undefined if cancelled). */
+  pickFolder(): Promise<string | undefined>;
+  /** Add a project by name + repo path; returns the updated settings. */
+  addProject(name: string, repoPath: string): Promise<SettingsInfo>;
+  /** Remove a project by id; returns the updated settings. */
+  removeProject(id: string): Promise<SettingsInfo>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   /** Subscribe to irreversible-op confirmation requests; returns an unsubscribe function. */

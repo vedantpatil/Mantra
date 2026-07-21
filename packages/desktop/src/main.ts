@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type WebContents } from "electron";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -13,8 +13,9 @@ import type {
 } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
-import { loadApiKeyIntoEnv } from "./config.js";
-import { loadProjects, resolveTarget } from "./projects.js";
+import { apiKeyStatus, loadApiKeyIntoEnv, saveApiKey } from "./config.js";
+import { addProject, loadProjects, removeProject, resolveTarget } from "./projects.js";
+import type { SettingsInfo } from "./shared.js";
 
 loadApiKeyIntoEnv(); // make the API key available to Finder-launched (double-clicked) app
 
@@ -34,8 +35,8 @@ const activeRuns = new Map<string, ActiveRun>();
 /** Open Ops incidents across all monitored projects, keyed `${repoPath}::${probe}`. */
 const openIncidents = new Map<string, OpsIncident>();
 
-/** Broadcast an app-wide event to every window so the renderer re-pulls the relevant state. */
-function broadcast(kind: AgentEvent["kind"]): void {
+/** Broadcast a payload-free app-wide event so the renderer re-pulls the relevant state. */
+function broadcast(kind: "reviews-changed" | "fleet-changed" | "incidents-changed"): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.webContents.isDestroyed()) w.webContents.send("agent:event", { kind } satisfies AgentEvent);
   }
@@ -74,6 +75,12 @@ function supervisorFor(repoPath: string): Supervisor {
   const sup = new Supervisor(projectId(basename(repoPath)), new InProcessBus(), () => Date.now(), sink);
   sup.hydrate(sink.replay());
   return sup;
+}
+
+/** Snapshot of setup state for the Settings screen (API key + projects). */
+function settings(): SettingsInfo {
+  const k = apiKeyStatus();
+  return { apiKeySet: k.set, apiKeySource: k.source, ...(k.masked ? { apiKeyMasked: k.masked } : {}), projects: loadProjects() };
 }
 
 /** Collect review-gate tasks across all registered projects (FR-2 / FR-14). */
@@ -254,7 +261,8 @@ function startOpsMonitoring(): void {
       onEvent: (e) => {
         const key = `${p.repoPath}::${e.probe}`;
         if (e.type === "escalated") {
-          openIncidents.set(key, { repoPath: p.repoPath, project: p.name, probe: e.probe, severity: e.severity, ...(e.note ? { note: e.note } : {}), openedAt: Date.now() });
+          const severity = e.severity === "critical" ? "critical" : "warn"; // escalations are never "ok"
+          openIncidents.set(key, { repoPath: p.repoPath, project: p.name, probe: e.probe, severity, ...(e.note ? { note: e.note } : {}), openedAt: Date.now() });
           broadcast("incidents-changed");
           broadcast("fleet-changed");
         } else if (e.type === "resolved") {
@@ -333,6 +341,29 @@ void app.whenReady().then(() => {
   ipcMain.handle("ops:list", () => [...openIncidents.values()]);
   ipcMain.handle("audit:list", (_e, limit?: number) => listAudit(limit ?? 20));
   ipcMain.handle("voice:normalize", (_e, text: string) => normalizeVoiceCommand(text));
+  ipcMain.handle("settings:get", () => settings());
+  ipcMain.handle("settings:setApiKey", (_e, key: string) => {
+    saveApiKey(key.trim());
+    broadcastFleetChanged(); // a newly-set key can unblock runs
+    return settings();
+  });
+  ipcMain.handle("settings:pickFolder", async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const res = win
+      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"], title: "Choose a project repository" })
+      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    return res.canceled ? undefined : res.filePaths[0];
+  });
+  ipcMain.handle("projects:add", (_e, name: string, repoPath: string) => {
+    addProject(name, repoPath);
+    broadcastFleetChanged();
+    return settings();
+  });
+  ipcMain.handle("projects:remove", (_e, id: string) => {
+    removeProject(id);
+    broadcastFleetChanged();
+    return settings();
+  });
 
   createWindow();
   startOpsMonitoring(); // poll configured health signals → triage → escalate to the Incidents rail
