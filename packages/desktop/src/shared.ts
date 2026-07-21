@@ -82,9 +82,16 @@ export interface ReviewItem {
 /** A run currently executing against a project — what makes a project show as live in the fleet. */
 export interface ActiveRun {
   readonly repoPath: string;
-  readonly kind: "run" | "crew";
+  readonly kind: "run" | "crew" | "ship";
   readonly task: string;
   readonly startedAt: number;
+}
+
+/** Ship a project's current branch: push → PR → CI gate → auto-merge → optional guarded deploy. */
+export interface ShipRequest {
+  readonly repoPath: string;
+  readonly title: string;
+  readonly deploy?: string;
 }
 
 /** Streamed from main → renderer during a run; the console renders these live. */
@@ -105,6 +112,8 @@ export interface MantraBridge {
   runTask(req: RunRequest): Promise<IntentAck>;
   /** Kicks off a crew run (Manager decomposes → Dev/QA → review); streams via onAgentEvent. */
   runCrew(req: RunRequest): Promise<IntentAck>;
+  /** Ships a reviewed change: push → PR → CI gate → auto-merge on green; streams via onAgentEvent. */
+  shipReview(req: ShipRequest): Promise<IntentAck>;
   /** Tasks awaiting human review across all projects (the review gate). */
   listReviews(): Promise<readonly ReviewItem[]>;
   /** Approve (→ done) or reject (→ requeue) a review task; persists to the task log. */

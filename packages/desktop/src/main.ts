@@ -1,12 +1,13 @@
 import { app, BrowserWindow, ipcMain, type WebContents } from "electron";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { projectId, taskId as makeTaskId } from "@mantra/core";
 import {
-  type Confirmer, type CrewEvent, FileTaskLog, InProcessBus, type RunEvent, Supervisor,
-  runAgentTask, runCrew,
+  type Confirmer, type CrewEvent, Effector, EnvSecretProvider, FileTaskLog, GhGitHost, InProcessBus,
+  type RunEvent, type ShipEvent, Supervisor, isGitRepo, liveShipEffects, runAgentTask, runCrew, runShip,
 } from "@mantra/orchestrator";
-import type { ActiveRun, AgentEvent, IntentSource, ReviewItem, RunRequest } from "./shared.js";
+import type { ActiveRun, AgentEvent, IntentSource, ReviewItem, RunRequest, ShipRequest } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
 import { loadApiKeyIntoEnv } from "./config.js";
@@ -169,6 +170,56 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
   }
 }
 
+async function startShip(req: ShipRequest, wc: WebContents): Promise<void> {
+  const send = (e: AgentEvent): void => {
+    if (!wc.isDestroyed()) wc.send("agent:event", e);
+  };
+  if (!isGitRepo(req.repoPath)) {
+    send({ kind: "error", message: `${req.repoPath} is not a git repository` });
+    return;
+  }
+  let branch = "";
+  try {
+    branch = execFileSync("git", ["-C", req.repoPath, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
+  } catch { /* handled below */ }
+  if (!branch || branch === "HEAD") {
+    send({ kind: "error", message: "could not determine the branch to ship (detached HEAD?)" });
+    return;
+  }
+
+  const onEvent = (e: ShipEvent): void => {
+    const text =
+      e.type === "pushed" ? `▸ pushed ${e.branch} → origin`
+      : e.type === "pr-opened" ? `▸ PR #${e.number} opened · ${e.url}`
+      : e.type === "ci" ? `  · CI ${e.status} (check ${e.attempt})`
+      : e.type === "merged" ? `  ✓ merged PR #${e.number} (CI green)`
+      : e.type === "deployed" ? `  ✓ ${e.detail}`
+      : `  ✗ aborted at ${e.stage}: ${e.reason}`;
+    send({ kind: "line", text });
+  };
+
+  // Push + deploy route through the Effector (permission matrix + the in-app confirm dialog).
+  const effector = new Effector(new EnvSecretProvider(), makeUiConfirmer(wc), liveShipEffects());
+  const endRun = beginRun({ repoPath: req.repoPath, kind: "ship", task: req.title, startedAt: Date.now() });
+  try {
+    send({ kind: "line", text: `▸ shipping ${branch} · "${req.title}"` });
+    const result = await runShip({
+      repoPath: req.repoPath, branch, title: req.title,
+      host: new GhGitHost(req.repoPath),
+      effector,
+      ...(req.deploy ? { deploy: { env: req.deploy } } : {}),
+      onEvent,
+    });
+    if (!result.ok) {
+      send({ kind: "error", message: `ship stopped at ${result.stage}${result.reason ? ` — ${result.reason}` : ""}` });
+      return;
+    }
+    send({ kind: "line", text: `▸ ship ${result.stage === "done" ? "complete" : `stopped at ${result.stage}`} · ${result.merged ? "merged" : "not merged"}${result.deployed ? " · deployed" : ""}` });
+  } finally {
+    endRun();
+  }
+}
+
 void app.whenReady().then(() => {
   ipcMain.handle("fleet:get", () => buildFleet(listReviews(), [...activeRuns.values()]));
   ipcMain.handle("projects:list", () => loadProjects());
@@ -182,6 +233,10 @@ void app.whenReady().then(() => {
   ipcMain.handle("crew:run", (event, req: RunRequest) => {
     void startCrew(req, event.sender);
     return { ok: true, message: `crew on: ${req.task}` };
+  });
+  ipcMain.handle("ship:run", (event, req: ShipRequest) => {
+    void startShip(req, event.sender);
+    return { ok: true, message: `shipping: ${req.title}` };
   });
   ipcMain.on("confirm:response", (_e, id: string, approved: boolean) => {
     const resolve = pendingConfirms.get(id);

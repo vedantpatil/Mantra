@@ -87,6 +87,11 @@ export default function App(): JSX.Element {
     refreshReviews();
     refreshFleet();
   }
+
+  async function shipReview(item: ReviewItem): Promise<void> {
+    const ack = await window.mantra.shipReview({ repoPath: item.repoPath, title: item.title });
+    setLines((ls) => [...ls, { kind: ack.ok ? "sys" : "err", text: `🚢 ${ack.message}` }]);
+  }
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [lines]);
@@ -203,9 +208,10 @@ export default function App(): JSX.Element {
                 <div className="dcard crit" key={r.id}>
                   <span className="pj">{r.project}</span>
                   <div className="t">{r.title}</div>
-                  <div className="s">Crew finished this — approve to accept, or send back for changes.</div>
+                  <div className="s">Crew finished this — approve to accept, ship to promote (PR → CI → merge), or send back.</div>
                   <div className="dbtns">
                     <button className="db" onClick={() => void resolveReview(r, false)}>Reject</button>
+                    <button className="db" onClick={() => void shipReview(r)}>Ship</button>
                     <button className="db primary" onClick={() => void resolveReview(r, true)}>Approve</button>
                   </div>
                 </div>

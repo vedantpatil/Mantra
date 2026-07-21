@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AgentEvent, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, ProjectRef, ReviewItem, RunRequest } from "./shared.js";
+import type { AgentEvent, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, ProjectRef, ReviewItem, RunRequest, ShipRequest } from "./shared.js";
 
 /** Exposes only the typed `MantraBridge` on `window.mantra` — no raw ipcRenderer, no Node. */
 contextBridge.exposeInMainWorld("mantra", {
@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("mantra", {
   listProjects: (): Promise<readonly ProjectRef[]> => ipcRenderer.invoke("projects:list"),
   runTask: (req: RunRequest): Promise<IntentAck> => ipcRenderer.invoke("task:run", req),
   runCrew: (req: RunRequest): Promise<IntentAck> => ipcRenderer.invoke("crew:run", req),
+  shipReview: (req: ShipRequest): Promise<IntentAck> => ipcRenderer.invoke("ship:run", req),
   listReviews: (): Promise<readonly ReviewItem[]> => ipcRenderer.invoke("reviews:list"),
   resolveReview: (repoPath: string, taskId: string, approve: boolean): Promise<IntentAck> =>
     ipcRenderer.invoke("review:resolve", repoPath, taskId, approve),

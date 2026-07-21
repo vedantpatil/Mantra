@@ -12,11 +12,12 @@ export function buildFleet(reviews: readonly ReviewItem[], activeRuns: readonly 
     const running = activeRuns.filter((r) => r.repoPath === p.repoPath);
     const inReview = reviews.filter((r) => r.repoPath === p.repoPath).length;
 
-    const runningAgents: FleetAgent[] = running.map((r) =>
-      r.kind === "crew"
-        ? { role: "Crew", badge: "C", task: r.task, status: "run" }
-        : { role: "Dev", badge: "D", task: r.task, status: "run" },
-    );
+    const AGENT_OF = {
+      crew: { role: "Crew", badge: "C" },
+      ship: { role: "Ship", badge: "S" },
+      run: { role: "Dev", badge: "D" },
+    } as const;
+    const runningAgents: FleetAgent[] = running.map((r) => ({ ...AGENT_OF[r.kind], task: r.task, status: "run" }));
     const reviewAgent: FleetAgent[] =
       inReview > 0 ? [{ role: "Crew", badge: "M", task: `${inReview} task(s) awaiting your review`, status: "gate" }] : [];
 
@@ -26,9 +27,9 @@ export function buildFleet(reviews: readonly ReviewItem[], activeRuns: readonly 
       name: p.name,
       health: isRunning || inReview > 0 ? "busy" : "ok",
       port: 0,
-      stage: isRunning ? (running[0].kind === "crew" ? "crew" : "running") : inReview > 0 ? "review" : "ready",
-      // lifecycle bar: running mid-flight (2), at the gate (3), idle (0).
-      stageIndex: isRunning ? 2 : inReview > 0 ? 3 : 0,
+      stage: isRunning ? running[0].kind : inReview > 0 ? "review" : "ready",
+      // lifecycle bar: ship near the end (4), other runs mid-flight (2), at the gate (3), idle (0).
+      stageIndex: isRunning ? (running[0].kind === "ship" ? 4 : 2) : inReview > 0 ? 3 : 0,
       agents: [...runningAgents, ...reviewAgent],
     };
   });
