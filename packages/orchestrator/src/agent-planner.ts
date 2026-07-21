@@ -1,7 +1,7 @@
 import type { Role } from "@mantra/core";
 import { HeuristicPlanner, type PlannedTask, type Planner } from "./coordinator.js";
 import type { Confirmer } from "./effector.js";
-import { type RunEvent, runAgentTask } from "./run-task.js";
+import { type AuthMode, type RunEvent, runAgentTask } from "./run-task.js";
 
 /**
  * Real Manager decomposition (FR-9): runs a Manager agent read-only in the repo (with the
@@ -15,6 +15,7 @@ export interface AgentPlannerConfig {
   readonly budgetUsd: number;
   readonly confirmer: Confirmer;
   readonly noGraph?: boolean;
+  readonly authMode?: AuthMode;
   readonly onRunEvent?: (event: RunEvent) => void;
 }
 
@@ -68,6 +69,7 @@ export class AgentPlanner implements Planner {
       budgetUsd: this.config.budgetUsd,
       dryRun: true, // planning is strictly read-only
       noGraph: this.config.noGraph ?? false,
+      authMode: this.config.authMode,
       confirmer: this.config.confirmer,
       onEvent: this.config.onRunEvent,
     });

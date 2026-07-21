@@ -14,7 +14,8 @@ import type {
 } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
-import { apiKeyStatus, githubStatus, loadApiKeyIntoEnv, loadGithubTokenIntoEnv, saveApiKey, saveGithubToken } from "./config.js";
+import { apiKeyStatus, checkAuth, getAuthMode, githubStatus, loadApiKeyIntoEnv, loadGithubTokenIntoEnv, saveApiKey, saveAuthMode, saveGithubToken } from "./config.js";
+import type { AuthMode } from "./config.js";
 import { addProject, loadProjects, removeProject, resolveTarget } from "./projects.js";
 import type { ProjectSettings, SettingsInfo } from "./shared.js";
 
@@ -96,6 +97,7 @@ function settings(): SettingsInfo {
   return {
     apiKeySet: k.set, apiKeySource: k.source, ...(k.masked ? { apiKeyMasked: k.masked } : {}),
     githubSet: g.set, ...(g.masked ? { githubMasked: g.masked } : {}),
+    authMode: getAuthMode(),
     projects,
   };
 }
@@ -156,6 +158,7 @@ async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
       repoPath, task: req.task,
       role: "developer", model: "claude-haiku-4-5", budgetUsd: 1,
       dryRun: req.dryRun, noPush: true, keepWorktree: req.dryRun ? false : true,
+      authMode: getAuthMode(),
       confirmer: makeUiConfirmer(wc),
       onEvent,
     });
@@ -195,6 +198,7 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
     const result = await runCrew({
       repoPath, goal: req.task,
       model: "claude-haiku-4-5", budgetUsd: 2, noPush: true,
+      authMode: getAuthMode(),
       confirmer: makeUiConfirmer(wc),
       onCrewEvent,
     });
@@ -379,6 +383,12 @@ void app.whenReady().then(() => {
     saveGithubToken(token.trim());
     return settings();
   });
+  ipcMain.handle("settings:setAuthMode", (_e, mode: AuthMode) => {
+    saveAuthMode(mode);
+    broadcastFleetChanged(); // switching to a working auth mode can unblock runs
+    return settings();
+  });
+  ipcMain.handle("settings:checkAuth", () => checkAuth(getAuthMode()));
   ipcMain.handle("monitors:add", (_e, repoPath: string, name: string, url: string) => {
     setMonitors(repoPath, (m) => [...m.filter((x) => x.name !== name.trim()), { name: name.trim(), url: url.trim() }]);
     startOpsMonitoring(); // pick up the new monitor without a restart

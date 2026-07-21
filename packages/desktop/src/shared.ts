@@ -70,6 +70,14 @@ export interface ProjectSettings extends ProjectRef {
   readonly isGitRepo: boolean;
 }
 
+/** How runs authenticate to Claude — a subscription (OAuth) or an API key. */
+export type AuthMode = "subscription" | "apiKey";
+/** Result of validating an auth mode against the live service. */
+export interface AuthHealth {
+  readonly ok: boolean;
+  readonly status: string;
+}
+
 /** Everything the in-app Settings screen needs — so the app is set up entirely from the UI. */
 export interface SettingsInfo {
   readonly apiKeySet: boolean;
@@ -77,6 +85,8 @@ export interface SettingsInfo {
   readonly apiKeyMasked?: string;
   readonly githubSet: boolean;
   readonly githubMasked?: string;
+  /** Current auth strategy for runs (defaults to "subscription"). */
+  readonly authMode: AuthMode;
   readonly projects: readonly ProjectSettings[];
 }
 
@@ -173,6 +183,10 @@ export interface MantraBridge {
   saveApiKey(key: string): Promise<SettingsInfo>;
   /** Save a GitHub token so Ship works without a terminal `gh auth login`. */
   saveGithubToken(token: string): Promise<SettingsInfo>;
+  /** Set the auth strategy for runs (subscription vs API key); returns the updated settings. */
+  setAuthMode(mode: AuthMode): Promise<SettingsInfo>;
+  /** Validate the current auth mode against the live service (API ping / CLI probe). */
+  checkAuth(): Promise<AuthHealth>;
   /** Open a native folder picker; returns the chosen absolute path (or undefined if cancelled). */
   pickFolder(): Promise<string | undefined>;
   /** Add a project by name + repo path; returns the updated settings. */

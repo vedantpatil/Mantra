@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AuditEntry, ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, OpsIncident, ReviewItem, SettingsInfo } from "../shared.js";
+import type { AuditEntry, AuthHealth, AuthMode, ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, OpsIncident, ReviewItem, SettingsInfo } from "../shared.js";
 
 interface Line {
   readonly kind: "you" | "sys" | "err";
@@ -45,6 +45,8 @@ export default function App(): JSX.Element {
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [settings, setSettings] = useState<SettingsInfo | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [authHealth, setAuthHealth] = useState<AuthHealth | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [githubInput, setGithubInput] = useState("");
   const [projName, setProjName] = useState("");
@@ -127,6 +129,21 @@ export default function App(): JSX.Element {
     setSettings(await window.mantra.saveGithubToken(githubInput.trim()));
     setGithubInput("");
     setLines((ls) => [...ls, { kind: "sys", text: "✓ GitHub token saved — Ship can push/merge without `gh auth login`." }]);
+  }
+  async function onSetAuthMode(mode: AuthMode): Promise<void> {
+    setAuthHealth(null);
+    setSettings(await window.mantra.setAuthMode(mode));
+    setLines((ls) => [...ls, { kind: "sys", text: `auth mode → ${mode === "subscription" ? "Claude subscription" : "API key"}` }]);
+  }
+  async function onCheckAuth(): Promise<void> {
+    setCheckingAuth(true);
+    try {
+      const h = await window.mantra.checkAuth();
+      setAuthHealth(h);
+      setLines((ls) => [...ls, { kind: h.ok ? "sys" : "err", text: `auth check: ${h.status}` }]);
+    } finally {
+      setCheckingAuth(false);
+    }
   }
   async function onPickFolder(): Promise<void> {
     const p = await window.mantra.pickFolder();
@@ -237,11 +254,37 @@ export default function App(): JSX.Element {
             <div className="modal-h">⚙ Setup</div>
             <div className="modal-b">
               <div className="set-sec">
+                <div className="set-label">Authentication</div>
+                <div className="set-row">
+                  <select
+                    className="set-input"
+                    value={settings?.authMode ?? "subscription"}
+                    onChange={(e) => void onSetAuthMode(e.target.value as AuthMode)}
+                  >
+                    <option value="subscription">Claude subscription (Pro/Max)</option>
+                    <option value="apiKey">API key</option>
+                  </select>
+                  <button className="db" onClick={() => void onCheckAuth()} disabled={checkingAuth}>
+                    {checkingAuth ? "Checking…" : "Check"}
+                  </button>
+                </div>
+                <div className={`set-status${authHealth && !authHealth.ok ? " warn-txt" : ""}`}>
+                  {authHealth
+                    ? authHealth.status
+                    : settings?.authMode === "apiKey"
+                      ? "Runs bill the Anthropic API wallet (console.anthropic.com — separate from claude.ai credits)."
+                      : "Runs use your Claude Pro/Max login — no API credit needed. Click Check to confirm."}
+                </div>
+              </div>
+
+              <div className="set-sec">
                 <div className="set-label">Anthropic API key</div>
                 <div className="set-status">
                   {settings?.apiKeySet
                     ? <>✓ set <code>{settings.apiKeyMasked}</code>{settings.apiKeySource === "env" ? " (from shell env)" : ""}</>
-                    : <span className="warn-txt">not set — required for live runs</span>}
+                    : <span className={settings?.authMode === "apiKey" ? "warn-txt" : ""}>
+                        not set{settings?.authMode === "apiKey" ? " — required for API-key mode" : " — only needed if you switch to API-key mode"}
+                      </span>}
                 </div>
                 <div className="set-row">
                   <input
@@ -320,7 +363,7 @@ export default function App(): JSX.Element {
         <span className="spend no-drag">${fleet ? fleet.spendToday.toFixed(2) : "0.00"} / ${fleet?.budget ?? 30}</span>
         <span className="pill no-drag"><span className="dot" />healthy</span>
         <button className="gear no-drag" title="Setup" onClick={() => setShowSettings(true)}>
-          ⚙{settings && !settings.apiKeySet && <span className="gear-dot" />}
+          ⚙{settings && settings.authMode === "apiKey" && !settings.apiKeySet && <span className="gear-dot" />}
         </button>
       </header>
 

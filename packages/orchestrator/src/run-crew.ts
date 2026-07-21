@@ -5,7 +5,7 @@ import { AgentPlanner } from "./agent-planner.js";
 import { type CrewEvent, Coordinator, type Planner } from "./coordinator.js";
 import type { Confirmer } from "./effector.js";
 import { loadProjectConfig } from "./project-config.js";
-import { type RunEvent, isGitRepo } from "./run-task.js";
+import { type AuthMode, type RunEvent, isGitRepo } from "./run-task.js";
 import { envRef } from "./secrets-env.js";
 import { defaultSecretProvider } from "./vault.js";
 import { FileTaskLog } from "./task-log.js";
@@ -25,6 +25,8 @@ export interface RunCrewOptions {
   readonly budgetUsd: number;
   readonly noPush?: boolean;
   readonly noGraph?: boolean;
+  /** Auth strategy; defaults to "apiKey" for backward compatibility (CLI). */
+  readonly authMode?: AuthMode;
   readonly confirmer: Confirmer;
   readonly planner?: Planner;
   readonly onCrewEvent?: (event: CrewEvent) => void;
@@ -44,11 +46,14 @@ export async function runCrew(opts: RunCrewOptions): Promise<RunCrewResult> {
   }
   const name = basename(opts.repoPath);
   const config = loadProjectConfig(opts.repoPath, name);
-  const apiKeyRef = config.apiKeyRef ? secretRef(config.apiKeyRef) : envRef("ANTHROPIC_API_KEY");
-  try {
-    await defaultSecretProvider().resolve(apiKeyRef);
-  } catch {
-    return { ok: false, reviewTitles: [], failedTitles: [], error: "ANTHROPIC_API_KEY is not set" };
+  // Subscription mode needs no key; only validate one when we're actually going to inject it.
+  if (opts.authMode !== "subscription") {
+    const apiKeyRef = config.apiKeyRef ? secretRef(config.apiKeyRef) : envRef("ANTHROPIC_API_KEY");
+    try {
+      await defaultSecretProvider().resolve(apiKeyRef);
+    } catch {
+      return { ok: false, reviewTitles: [], failedTitles: [], error: "ANTHROPIC_API_KEY is not set" };
+    }
   }
 
   const sink = new FileTaskLog(opts.repoPath); // resumable crew state under .mantra/state/
@@ -63,6 +68,7 @@ export async function runCrew(opts: RunCrewOptions): Promise<RunCrewResult> {
     confirmer: opts.confirmer,
     noPush: opts.noPush ?? true,
     noGraph: opts.noGraph ?? false,
+    authMode: opts.authMode,
     onRunEvent: (task, e) => opts.onRunEvent?.(task.title, e),
   });
 
@@ -74,6 +80,7 @@ export async function runCrew(opts: RunCrewOptions): Promise<RunCrewResult> {
       budgetUsd: opts.budgetUsd,
       confirmer: opts.confirmer,
       noGraph: opts.noGraph,
+      authMode: opts.authMode,
       onRunEvent: (e) => opts.onRunEvent?.("Manager planning", e),
     });
   const coordinator = new Coordinator(supervisor, planner, executor, { onEvent: opts.onCrewEvent });

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AgentEvent, AuditEntry, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, OpsIncident, ProjectRef, ReviewItem, RunRequest, SettingsInfo, ShipRequest } from "./shared.js";
+import type { AgentEvent, AuditEntry, AuthHealth, AuthMode, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, OpsIncident, ProjectRef, ReviewItem, RunRequest, SettingsInfo, ShipRequest } from "./shared.js";
 
 /** Exposes only the typed `MantraBridge` on `window.mantra` — no raw ipcRenderer, no Node. */
 contextBridge.exposeInMainWorld("mantra", {
@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("mantra", {
   getSettings: (): Promise<SettingsInfo> => ipcRenderer.invoke("settings:get"),
   saveApiKey: (key: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setApiKey", key),
   saveGithubToken: (token: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setGithubToken", token),
+  setAuthMode: (mode: AuthMode): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setAuthMode", mode),
+  checkAuth: (): Promise<AuthHealth> => ipcRenderer.invoke("settings:checkAuth"),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("settings:pickFolder"),
   addProject: (name: string, repoPath: string): Promise<SettingsInfo> => ipcRenderer.invoke("projects:add", name, repoPath),
   removeProject: (id: string): Promise<SettingsInfo> => ipcRenderer.invoke("projects:remove", id),

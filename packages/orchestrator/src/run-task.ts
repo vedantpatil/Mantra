@@ -24,6 +24,14 @@ export type RunEvent =
   | { readonly type: "effector"; readonly detail: unknown }
   | { readonly type: "warn"; readonly message: string };
 
+/**
+ * How the agent authenticates to Claude:
+ *   - "apiKey": inject ANTHROPIC_API_KEY (bills the Anthropic API / console wallet).
+ *   - "subscription": inject NO key, so the underlying Claude Code CLI uses its stored
+ *     OAuth credentials (a Pro/Max subscription). Lets the operator run without API credit.
+ */
+export type AuthMode = "subscription" | "apiKey";
+
 export interface RunTaskOptions {
   readonly repoPath: string;
   readonly task: string;
@@ -35,6 +43,8 @@ export interface RunTaskOptions {
   readonly noPush?: boolean;
   readonly noGraph?: boolean;
   readonly keepWorktree?: boolean;
+  /** Auth strategy; defaults to "apiKey" for backward compatibility (CLI). */
+  readonly authMode?: AuthMode;
   readonly confirmer: Confirmer;
   readonly onEvent?: (event: RunEvent) => void;
 }
@@ -80,12 +90,18 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
   }
 
   const config = loadProjectConfig(opts.repoPath, name);
-  const apiKeyRef = config.apiKeyRef ? secretRef(config.apiKeyRef) : envRef("ANTHROPIC_API_KEY");
   const secrets = defaultSecretProvider();
-  try {
-    await secrets.resolve(apiKeyRef);
-  } catch {
-    return { ...empty, ok: false, stopReason: "error", error: "ANTHROPIC_API_KEY is not set" };
+  // Subscription mode carries no key — the CLI falls back to its OAuth (Pro/Max) credentials.
+  const subscription = opts.authMode === "subscription";
+  const apiKeyRef = subscription
+    ? undefined
+    : config.apiKeyRef ? secretRef(config.apiKeyRef) : envRef("ANTHROPIC_API_KEY");
+  if (apiKeyRef) {
+    try {
+      await secrets.resolve(apiKeyRef);
+    } catch {
+      return { ...empty, ok: false, stopReason: "error", error: "ANTHROPIC_API_KEY is not set" };
+    }
   }
 
   const denyCapabilities: Capability[] = [];
@@ -106,7 +122,7 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
   const worktrees = new WorktreeManager(opts.repoPath);
   const tid = taskId(`run-${Date.now()}`);
   const wt = await worktrees.create(tid);
-  emit({ type: "info", message: `worktree ${wt.path} (${wt.branch}) · model ${opts.model} · budget $${budget} · dual-graph ${dualGraph ? "on" : "off"}${denyCapabilities.length ? ` · denied ${denyCapabilities.join(",")}` : ""}` });
+  emit({ type: "info", message: `worktree ${wt.path} (${wt.branch}) · model ${opts.model} · budget $${budget} · auth ${subscription ? "subscription" : "api-key"} · dual-graph ${dualGraph ? "on" : "off"}${denyCapabilities.length ? ` · denied ${denyCapabilities.join(",")}` : ""}` });
 
   let tripped: string | undefined;
   const breaker = new CircuitBreaker({
@@ -122,7 +138,7 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
     role: opts.role,
     model: opts.model,
     worktreePath: wt.path,
-    apiKeyRef,
+    ...(apiKeyRef ? { apiKeyRef } : {}),
     denyCapabilities,
     ...(dualGraph ? { dualGraph } : {}),
   };

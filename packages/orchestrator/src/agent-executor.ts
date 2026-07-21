@@ -1,7 +1,7 @@
 import type { Role, TaskProjection } from "@mantra/core";
 import type { ExecOutcome, TaskExecutor } from "./coordinator.js";
 import type { Confirmer } from "./effector.js";
-import { type RunEvent, runAgentTask } from "./run-task.js";
+import { type AuthMode, type RunEvent, runAgentTask } from "./run-task.js";
 
 /**
  * Live crew executor: each task is run by a real specialist agent (its assignee role) in
@@ -15,6 +15,7 @@ export interface AgentExecutorConfig {
   readonly confirmer: Confirmer;
   readonly noPush?: boolean;
   readonly noGraph?: boolean;
+  readonly authMode?: AuthMode;
   readonly onRunEvent?: (task: TaskProjection, event: RunEvent) => void;
 }
 
@@ -31,6 +32,7 @@ export class AgentExecutor implements TaskExecutor {
       budgetUsd: this.config.budgetUsd,
       noPush: this.config.noPush ?? true,
       noGraph: this.config.noGraph ?? false,
+      authMode: this.config.authMode,
       keepWorktree: true, // keep each task's worktree for the review gate
       confirmer: this.config.confirmer,
       onEvent: (e) => this.config.onRunEvent?.(task, e),

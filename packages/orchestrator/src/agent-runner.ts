@@ -28,7 +28,8 @@ export interface AgentSpec {
   readonly role: Role;
   readonly model: string;
   readonly worktreePath: string;
-  readonly apiKeyRef: SecretRef;
+  /** Absent ⇒ subscription auth: no key is injected, so the CLI uses its OAuth credentials. */
+  readonly apiKeyRef?: SecretRef;
   /** Resume a prior Claude Code session instead of starting fresh. */
   readonly resumeSessionId?: string;
   /** When set, the agent gets a dual-graph MCP + a retrieve-before-explore contract (ADR-11). */
@@ -134,7 +135,12 @@ export class AgentRunner {
    */
   async run(spec: AgentSpec, prompt: string, breaker: CircuitBreaker): Promise<AgentRunResult> {
     const { bus, secrets } = this.deps;
-    const apiKey = await secrets.resolve(spec.apiKeyRef); // ADR-3: stays out of the prompt
+    // ADR-3: the key stays out of the prompt. No ref ⇒ subscription mode: inject nothing
+    // and strip any inherited ANTHROPIC_API_KEY so the CLI falls back to its OAuth login.
+    const apiKey = spec.apiKeyRef ? await secrets.resolve(spec.apiKeyRef) : undefined;
+    const childEnv: Record<string, string> = { ...process.env } as Record<string, string>;
+    if (apiKey) childEnv.ANTHROPIC_API_KEY = apiKey;
+    else delete childEnv.ANTHROPIC_API_KEY;
     const abort = new AbortController();
 
     const systemPrompt = spec.dualGraph
@@ -147,7 +153,7 @@ export class AgentRunner {
       systemPrompt,
       permissionMode: "default",
       canUseTool: this.buildCanUseTool(spec, breaker, abort),
-      env: { ...process.env, ANTHROPIC_API_KEY: apiKey },
+      env: childEnv,
       abortController: abort,
       ...(spec.resumeSessionId ? { resume: spec.resumeSessionId } : {}),
       ...(spec.dualGraph
