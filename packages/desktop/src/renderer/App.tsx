@@ -277,6 +277,9 @@ export default function App(): JSX.Element {
                     <div className="set-proj" key={p.id}>
                       <div className="set-proj-t">{p.name}</div>
                       <div className="set-proj-p">{p.repoPath}</div>
+                      {!p.isGitRepo && (
+                        <div className="set-status warn-txt">⚠ not a git repo — runs need a worktree. Run <code>git init</code> here first.</div>
+                      )}
                       <button className="db ghost" onClick={() => void onRemoveProject(p.id)}>Remove</button>
                       <div className="set-mons">
                         {p.monitors.map((m) => (

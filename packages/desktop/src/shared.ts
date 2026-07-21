@@ -66,6 +66,8 @@ export interface MonitorRef {
 /** A project plus its Ops monitors, as shown in Setup. */
 export interface ProjectSettings extends ProjectRef {
   readonly monitors: readonly MonitorRef[];
+  /** False when the folder isn't a git repo — runs need a worktree, so Setup warns. */
+  readonly isGitRepo: boolean;
 }
 
 /** Everything the in-app Settings screen needs — so the app is set up entirely from the UI. */

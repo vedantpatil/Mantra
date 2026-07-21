@@ -92,7 +92,7 @@ function monitorsFor(repoPath: string, name: string): ProjectSettings["monitors"
 function settings(): SettingsInfo {
   const k = apiKeyStatus();
   const g = githubStatus();
-  const projects: ProjectSettings[] = loadProjects().map((p) => ({ ...p, monitors: monitorsFor(p.repoPath, p.name) }));
+  const projects: ProjectSettings[] = loadProjects().map((p) => ({ ...p, monitors: monitorsFor(p.repoPath, p.name), isGitRepo: isGitRepo(p.repoPath) }));
   return {
     apiKeySet: k.set, apiKeySource: k.source, ...(k.masked ? { apiKeyMasked: k.masked } : {}),
     githubSet: g.set, ...(g.masked ? { githubMasked: g.masked } : {}),

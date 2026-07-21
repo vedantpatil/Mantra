@@ -32,12 +32,11 @@
       "output": "release",
       "buildResources": "build"
     },
+    "asar": false,
     "files": [
       "dist/**/*",
-      { "from": "../../node_modules/@anthropic-ai/claude-agent-sdk", "to": "node_modules/@anthropic-ai/claude-agent-sdk" }
-    ],
-    "asarUnpack": [
-      "node_modules/@anthropic-ai/**/*"
+      { "from": "../../node_modules/@anthropic-ai/claude-agent-sdk", "to": "node_modules/@anthropic-ai/claude-agent-sdk" },
+      { "from": "../../node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64", "to": "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64" }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
