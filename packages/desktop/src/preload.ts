@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AgentEvent, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, ProjectRef, ReviewItem, RunRequest, ShipRequest } from "./shared.js";
+import type { AgentEvent, AuditEntry, ConfirmRequest, FleetSnapshot, IntentAck, IntentSource, OpsIncident, ProjectRef, ReviewItem, RunRequest, ShipRequest } from "./shared.js";
 
 /** Exposes only the typed `MantraBridge` on `window.mantra` — no raw ipcRenderer, no Node. */
 contextBridge.exposeInMainWorld("mantra", {
@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("mantra", {
   listReviews: (): Promise<readonly ReviewItem[]> => ipcRenderer.invoke("reviews:list"),
   resolveReview: (repoPath: string, taskId: string, approve: boolean): Promise<IntentAck> =>
     ipcRenderer.invoke("review:resolve", repoPath, taskId, approve),
+  listIncidents: (): Promise<readonly OpsIncident[]> => ipcRenderer.invoke("ops:list"),
+  listAudit: (limit?: number): Promise<readonly AuditEntry[]> => ipcRenderer.invoke("audit:list", limit),
   onAgentEvent: (cb: (event: AgentEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AgentEvent): void => cb(payload);
     ipcRenderer.on("agent:event", listener);

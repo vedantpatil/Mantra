@@ -4,10 +4,13 @@ import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { projectId, taskId as makeTaskId } from "@mantra/core";
 import {
-  type Confirmer, type CrewEvent, Effector, EnvSecretProvider, FileTaskLog, GhGitHost, InProcessBus,
-  type RunEvent, type ShipEvent, Supervisor, isGitRepo, liveShipEffects, runAgentTask, runCrew, runShip,
+  type AuditEvent, type Confirmer, type CrewEvent, Effector, EnvSecretProvider, FileAuditLog, FileTaskLog,
+  GhGitHost, InProcessBus, OpsMonitor, type RunEvent, type ShipEvent, Supervisor, httpProbe, isGitRepo,
+  liveShipEffects, loadProjectConfig, runAgentTask, runCrew, runShip,
 } from "@mantra/orchestrator";
-import type { ActiveRun, AgentEvent, IntentSource, ReviewItem, RunRequest, ShipRequest } from "./shared.js";
+import type {
+  ActiveRun, AgentEvent, AuditEntry, IntentSource, OpsIncident, ReviewItem, RunRequest, ShipRequest,
+} from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
 import { loadApiKeyIntoEnv } from "./config.js";
@@ -28,11 +31,17 @@ const pendingConfirms = new Map<string, (approved: boolean) => void>();
 /** Runs currently executing, keyed by a unique run id — this is what makes a project show live. */
 const activeRuns = new Map<string, ActiveRun>();
 
-/** Tell every window the fleet changed so it re-pulls getFleet (a run started or finished). */
-function broadcastFleetChanged(): void {
+/** Open Ops incidents across all monitored projects, keyed `${repoPath}::${probe}`. */
+const openIncidents = new Map<string, OpsIncident>();
+
+/** Broadcast an app-wide event to every window so the renderer re-pulls the relevant state. */
+function broadcast(kind: AgentEvent["kind"]): void {
   for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.webContents.isDestroyed()) w.webContents.send("agent:event", { kind: "fleet-changed" } satisfies AgentEvent);
+    if (!w.webContents.isDestroyed()) w.webContents.send("agent:event", { kind } satisfies AgentEvent);
   }
+}
+function broadcastFleetChanged(): void {
+  broadcast("fleet-changed");
 }
 
 /** Mark a run live and return a disposer that clears it — call the disposer in a finally. */
@@ -187,6 +196,8 @@ async function startShip(req: ShipRequest, wc: WebContents): Promise<void> {
     return;
   }
 
+  const audit = new FileAuditLog(req.repoPath);
+  const project = basename(req.repoPath);
   const onEvent = (e: ShipEvent): void => {
     const text =
       e.type === "pushed" ? `▸ pushed ${e.branch} → origin`
@@ -196,6 +207,10 @@ async function startShip(req: ShipRequest, wc: WebContents): Promise<void> {
       : e.type === "deployed" ? `  ✓ ${e.detail}`
       : `  ✗ aborted at ${e.stage}: ${e.reason}`;
     send({ kind: "line", text });
+    // Mirror the significant ship transitions into the cross-cutting audit trail (FR-24).
+    if (e.type === "merged") audit.record({ at: Date.now(), kind: "ship.merged", project, detail: { pr: e.number } });
+    else if (e.type === "deployed") audit.record({ at: Date.now(), kind: "ship.deployed", project, detail: { env: e.env } });
+    else if (e.type === "aborted") audit.record({ at: Date.now(), kind: "ship.aborted", project, detail: { stage: e.stage, reason: e.reason } });
   };
 
   // Push + deploy route through the Effector (permission matrix + the in-app confirm dialog).
@@ -220,8 +235,70 @@ async function startShip(req: ShipRequest, wc: WebContents): Promise<void> {
   }
 }
 
+/**
+ * Ops monitoring (P5): one OpsMonitor per project that declares `monitors` in its config, ticked
+ * on an interval. Escalations/resolutions update the shared incident map (surfaced in the fleet +
+ * the Incidents rail) and are written to that project's audit trail by the engine. Skipped under
+ * the boot smoke so it never fires network probes during the headless check.
+ */
+function startOpsMonitoring(): void {
+  if (process.env.MANTRA_SMOKE === "1") return;
+  const monitors: OpsMonitor[] = [];
+  for (const p of loadProjects()) {
+    const cfg = loadProjectConfig(p.repoPath, p.name);
+    if (!cfg.monitors?.length) continue;
+    const mon = new OpsMonitor({
+      probes: cfg.monitors.map((m) => httpProbe(m.name, m.url)),
+      audit: new FileAuditLog(p.repoPath),
+      project: p.name,
+      onEvent: (e) => {
+        const key = `${p.repoPath}::${e.probe}`;
+        if (e.type === "escalated") {
+          openIncidents.set(key, { repoPath: p.repoPath, project: p.name, probe: e.probe, severity: e.severity, ...(e.note ? { note: e.note } : {}), openedAt: Date.now() });
+          broadcast("incidents-changed");
+          broadcast("fleet-changed");
+        } else if (e.type === "resolved") {
+          openIncidents.delete(key);
+          broadcast("incidents-changed");
+          broadcast("fleet-changed");
+        }
+      },
+    });
+    monitors.push(mon);
+  }
+  if (monitors.length === 0) return;
+  const tickAll = (): void => { for (const m of monitors) void m.tick(); };
+  tickAll();
+  setInterval(tickAll, 30_000);
+}
+
+/** Read the recent audit trail across all projects, newest first, for the renderer's activity feed. */
+function listAudit(limit: number): AuditEntry[] {
+  const all: AuditEntry[] = [];
+  for (const p of loadProjects()) {
+    for (const e of new FileAuditLog(p.repoPath).entries()) {
+      all.push({ at: e.at, kind: e.kind, project: e.project ?? p.name, summary: summarizeAudit(e) });
+    }
+  }
+  return all.sort((a, b) => b.at - a.at).slice(0, limit);
+}
+
+function summarizeAudit(e: AuditEvent): string {
+  const d = e.detail ?? {};
+  switch (e.kind) {
+    case "ops.escalated": return `${String(d.probe)} → ${String(d.severity)}${d.upgraded ? " (upgraded)" : ""}${d.note ? `: ${String(d.note)}` : ""}`;
+    case "ops.resolved": return `${String(d.probe)} recovered (was ${String(d.wasSeverity)})`;
+    case "ship.merged": return `merged PR #${String(d.pr ?? "?")}`;
+    case "ship.deployed": return `deployed to ${String(d.env ?? "?")}`;
+    case "ship.aborted": return `ship aborted at ${String(d.stage)}: ${String(d.reason)}`;
+    case "review.approved": return `approved: ${String(d.title ?? "")}`;
+    case "review.rejected": return `sent back: ${String(d.title ?? "")}`;
+    default: return e.kind;
+  }
+}
+
 void app.whenReady().then(() => {
-  ipcMain.handle("fleet:get", () => buildFleet(listReviews(), [...activeRuns.values()]));
+  ipcMain.handle("fleet:get", () => buildFleet(listReviews(), [...activeRuns.values()], [...openIncidents.values()]));
   ipcMain.handle("projects:list", () => loadProjects());
   ipcMain.handle("intent:submit", (_e, payload: { raw: string; source: IntentSource }) =>
     routeIntent(payload.raw, payload.source),
@@ -245,12 +322,19 @@ void app.whenReady().then(() => {
   ipcMain.handle("reviews:list", () => listReviews());
   ipcMain.handle("review:resolve", (_e, repoPath: string, id: string, approve: boolean) => {
     const sup = supervisorFor(repoPath);
+    const title = sup.tasksInState("review").find((t) => t.id === id)?.title ?? "";
     if (approve) sup.approve(makeTaskId(id));
     else sup.requeue(makeTaskId(id));
+    new FileAuditLog(repoPath).record({
+      at: Date.now(), kind: approve ? "review.approved" : "review.rejected", project: basename(repoPath), detail: { title },
+    });
     return { ok: true, message: approve ? "approved" : "sent back for changes" };
   });
+  ipcMain.handle("ops:list", () => [...openIncidents.values()]);
+  ipcMain.handle("audit:list", (_e, limit?: number) => listAudit(limit ?? 20));
 
   createWindow();
+  startOpsMonitoring(); // poll configured health signals → triage → escalate to the Incidents rail
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

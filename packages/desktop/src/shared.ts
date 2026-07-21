@@ -94,6 +94,24 @@ export interface ShipRequest {
   readonly deploy?: string;
 }
 
+/** An open Ops incident surfaced to the operator (a monitor escalated). */
+export interface OpsIncident {
+  readonly repoPath: string;
+  readonly project: string;
+  readonly probe: string;
+  readonly severity: "warn" | "critical";
+  readonly note?: string;
+  readonly openedAt: number;
+}
+
+/** One line of the cross-cutting audit trail (ops/ship/review), newest-first in the feed. */
+export interface AuditEntry {
+  readonly at: number;
+  readonly kind: string;
+  readonly project?: string;
+  readonly summary: string;
+}
+
 /** Streamed from main → renderer during a run; the console renders these live. */
 export type AgentEvent =
   | { readonly kind: "line"; readonly text: string }
@@ -101,7 +119,9 @@ export type AgentEvent =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "reviews-changed" }
   /** Fleet-level state changed (a run started or ended) — the renderer should re-pull getFleet. */
-  | { readonly kind: "fleet-changed" };
+  | { readonly kind: "fleet-changed" }
+  /** An Ops incident opened/resolved — the renderer should re-pull listIncidents + the audit feed. */
+  | { readonly kind: "incidents-changed" };
 
 /** The safe surface exposed to the renderer via contextBridge. */
 export interface MantraBridge {
@@ -118,6 +138,10 @@ export interface MantraBridge {
   listReviews(): Promise<readonly ReviewItem[]>;
   /** Approve (→ done) or reject (→ requeue) a review task; persists to the task log. */
   resolveReview(repoPath: string, taskId: string, approve: boolean): Promise<IntentAck>;
+  /** Open Ops incidents across all monitored projects (monitor → triage → escalate). */
+  listIncidents(): Promise<readonly OpsIncident[]>;
+  /** Recent cross-cutting audit entries (ops/ship/review), newest first. */
+  listAudit(limit?: number): Promise<readonly AuditEntry[]>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   /** Subscribe to irreversible-op confirmation requests; returns an unsubscribe function. */

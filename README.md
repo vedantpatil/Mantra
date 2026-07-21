@@ -35,9 +35,13 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   **command console** (dual to voice) and a push-to-talk affordance. The fleet view reflects
   **live agent status** — a project shows `busy` with its running agent(s) while a `run`/`crew`/`ship`
   executes (main streams a `fleet-changed` event as runs start/finish), `review` when tasks await
-  the gate, else `ready`. Each review card offers **Reject / Ship / Approve**: **Ship** runs the P4
-  pipeline on the project's current branch (push → PR → CI gate → auto-merge on green), with push +
-  deploy behind the in-app confirm dialog. Main process is the trusted host (contextIsolation on, a
+  the gate, else `ready` — and `blk` (blocked) when an **Ops incident** is open. Each review card
+  offers **Reject / Ship / Approve**: **Ship** runs the P4 pipeline on the project's current branch
+  (push → PR → CI gate → auto-merge on green), with push + deploy behind the in-app confirm dialog.
+  A background **Ops loop** polls each project's configured `monitors`, triages via `OpsMonitor`, and
+  surfaces escalations in an **Incidents rail** (`incidents-changed` push); an **Audit trail** feed
+  shows the cross-cutting ledger (ops escalations/resolutions, ship merges/deploys, review decisions)
+  read from `.mantra/state/audit.jsonl`. Main process is the trusted host (contextIsolation on, a
   narrow typed IPC surface); the React renderer is sandboxed. Built with esbuild.
   Run: `npm --prefix packages/desktop run build && npm --prefix packages/desktop start`.
 - **`@mantra/cli`** — `mantra run <repo> "<task>"`: the assembled spine for a single live agent.

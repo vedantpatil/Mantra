@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, ReviewItem } from "../shared.js";
+import type { AuditEntry, ConfirmRequest, FleetProject, FleetSnapshot, IntentSource, OpsIncident, ReviewItem } from "../shared.js";
 
 interface Line {
   readonly kind: "you" | "sys" | "err";
@@ -40,6 +40,8 @@ function Project({ p }: { p: FleetProject }): JSX.Element {
 export default function App(): JSX.Element {
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
   const [reviews, setReviews] = useState<readonly ReviewItem[]>([]);
+  const [incidents, setIncidents] = useState<readonly OpsIncident[]>([]);
+  const [audit, setAudit] = useState<readonly AuditEntry[]>([]);
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [mode, setMode] = useState<IntentSource>("console");
   const [listening, setListening] = useState(false);
@@ -57,14 +59,23 @@ export default function App(): JSX.Element {
   const refreshFleet = (): void => {
     void window.mantra.getFleet().then(setFleet);
   };
+  const refreshIncidents = (): void => {
+    void window.mantra.listIncidents().then(setIncidents);
+  };
+  const refreshAudit = (): void => {
+    void window.mantra.listAudit(12).then(setAudit);
+  };
 
   useEffect(() => {
     refreshFleet();
     refreshReviews();
+    refreshIncidents();
+    refreshAudit();
     const unsub = window.mantra.onAgentEvent((e) => {
       if (e.kind === "line") setLines((ls) => [...ls, { kind: "sys", text: e.text }]);
-      else if (e.kind === "fleet-changed") refreshFleet();
-      else if (e.kind === "reviews-changed") { refreshReviews(); refreshFleet(); }
+      else if (e.kind === "fleet-changed") { refreshFleet(); refreshAudit(); }
+      else if (e.kind === "incidents-changed") { refreshIncidents(); refreshFleet(); refreshAudit(); }
+      else if (e.kind === "reviews-changed") { refreshReviews(); refreshFleet(); refreshAudit(); }
       else if (e.kind === "done") {
         const detail = e.diffStat ? `\n${e.diffStat}\nreview: git -C ${e.worktreePath} diff` : " · no file changes";
         setLines((ls) => [...ls, { kind: "sys", text: `✓ done · cost $${e.costUsd.toFixed(4)} · ${e.stopReason}${detail}` }]);
@@ -201,6 +212,18 @@ export default function App(): JSX.Element {
         </main>
 
         <aside className="rail">
+          {incidents.length > 0 && (
+            <>
+              <div className="rail-h">Incidents <span className="cnt">{incidents.length}</span></div>
+              {incidents.map((inc) => (
+                <div className={`dcard${inc.severity === "critical" ? " crit" : ""}`} key={`${inc.repoPath}::${inc.probe}`}>
+                  <span className="pj">{inc.project}</span>
+                  <div className="t">🚨 {inc.probe} — {inc.severity}</div>
+                  <div className="s">{inc.note ?? "health signal degraded"} · escalated for your attention (remediation is human-gated).</div>
+                </div>
+              ))}
+            </>
+          )}
           {reviews.length > 0 && (
             <>
               <div className="rail-h">Awaiting your review <span className="cnt">{reviews.length}</span></div>
@@ -237,6 +260,19 @@ export default function App(): JSX.Element {
               </div>
             </div>
           ))}
+          {audit.length > 0 && (
+            <>
+              <div className="rail-h">Audit trail</div>
+              <div className="audit">
+                {audit.map((a, i) => (
+                  <div className="arow" key={`${a.at}-${i}`}>
+                    <span className="ak">{a.kind}</span>
+                    <span className="as-txt">{a.project ? `${a.project}: ` : ""}{a.summary}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </aside>
       </div>
 
