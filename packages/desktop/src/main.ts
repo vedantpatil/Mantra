@@ -6,7 +6,7 @@ import { projectId, taskId as makeTaskId } from "@mantra/core";
 import {
   type AuditEvent, type Confirmer, type CrewEvent, Effector, FileAuditLog, FileTaskLog,
   GhGitHost, InProcessBus, OpsMonitor, type RunEvent, type ShipEvent, Supervisor, defaultSecretProvider,
-  httpProbe, isGitRepo, liveShipEffects, loadProjectConfig, runAgentTask, runCrew, runShip,
+  httpProbe, isGitRepo, liveShipEffects, loadProjectConfig, normalizeVoiceCommand, runAgentTask, runCrew, runShip,
 } from "@mantra/orchestrator";
 import type {
   ActiveRun, AgentEvent, AuditEntry, IntentSource, OpsIncident, ReviewItem, RunRequest, ShipRequest,
@@ -332,6 +332,7 @@ void app.whenReady().then(() => {
   });
   ipcMain.handle("ops:list", () => [...openIncidents.values()]);
   ipcMain.handle("audit:list", (_e, limit?: number) => listAudit(limit ?? 20));
+  ipcMain.handle("voice:normalize", (_e, text: string) => normalizeVoiceCommand(text));
 
   createWindow();
   startOpsMonitoring(); // poll configured health signals → triage → escalate to the Incidents rail

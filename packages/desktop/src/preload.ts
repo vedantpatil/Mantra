@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("mantra", {
     ipcRenderer.invoke("review:resolve", repoPath, taskId, approve),
   listIncidents: (): Promise<readonly OpsIncident[]> => ipcRenderer.invoke("ops:list"),
   listAudit: (limit?: number): Promise<readonly AuditEntry[]> => ipcRenderer.invoke("audit:list", limit),
+  normalizeVoice: (text: string): Promise<string> => ipcRenderer.invoke("voice:normalize", text),
   onAgentEvent: (cb: (event: AgentEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AgentEvent): void => cb(payload);
     ipcRenderer.on("agent:event", listener);

@@ -142,6 +142,8 @@ export interface MantraBridge {
   listIncidents(): Promise<readonly OpsIncident[]>;
   /** Recent cross-cutting audit entries (ops/ship/review), newest first. */
   listAudit(limit?: number): Promise<readonly AuditEntry[]>;
+  /** Normalize a raw voice transcript into the console command grammar (voice ⇔ console parity). */
+  normalizeVoice(text: string): Promise<string>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   /** Subscribe to irreversible-op confirmation requests; returns an unsubscribe function. */

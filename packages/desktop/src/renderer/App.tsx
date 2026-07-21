@@ -129,12 +129,14 @@ export default function App(): JSX.Element {
   }
 
   function togglePushToTalk(): void {
-    // Voice is the equal peer of the console (§5.7). Real STT (whisper.cpp) lands in P5;
-    // here we use the platform SpeechRecognition when present, else note it's pending.
+    // Voice is the equal peer of the console (§5.7): the transcript is normalized into the
+    // same `<verb> <target>: <text>` grammar the console parses (main owns the normalizer).
+    // Uses the platform SpeechRecognition when present; local whisper.cpp is the CLI path
+    // (`mantra transcribe`) and the offline in-app capture is the remaining native wiring.
     const SR = (window as unknown as { webkitSpeechRecognition?: new () => typeof recognition.current }).webkitSpeechRecognition;
     if (!SR) {
       setListening((v) => !v);
-      setLines((ls) => [...ls, { kind: "sys", text: "🎙 push-to-talk armed — local STT (whisper.cpp) wiring is P5; type in the console meanwhile." }]);
+      setLines((ls) => [...ls, { kind: "sys", text: "🎙 no in-browser STT here — use `mantra transcribe <file.wav>` (local whisper.cpp) or type below." }]);
       return;
     }
     if (listening) {
@@ -149,7 +151,11 @@ export default function App(): JSX.Element {
     };
     r.continuous = false;
     r.interimResults = false;
-    r.onresult = (e) => setInput(e.results[0]?.[0]?.transcript ?? "");
+    r.onresult = (e) => {
+      const heard = e.results[0]?.[0]?.transcript ?? "";
+      // Route through the canonical normalizer so voice and typing converge on one intent path.
+      void window.mantra.normalizeVoice(heard).then((cmd) => setInput(cmd || heard));
+    };
     r.onend = () => setListening(false);
     recognition.current = r;
     r.start();

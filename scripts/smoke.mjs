@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip, OpsMonitor, MemoryAuditLog, FileVault, VaultSecretProvider, CompositeSecretProvider, vaultRef } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip, OpsMonitor, MemoryAuditLog, FileVault, VaultSecretProvider, CompositeSecretProvider, vaultRef, normalizeVoiceCommand, FakeTranscriber, WhisperCppTranscriber } from "@mantra/orchestrator";
 import { writeFileSync as _writeFileSync, readFileSync as _readFileSync } from "node:fs";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
@@ -357,6 +357,27 @@ const newSup = (sink) => new Supervisor(projectId("crew"), new InProcessBus(), (
   assert(badScheme, "vault: unknown scheme rejected");
 
   rmSync(dir, { recursive: true, force: true });
+}
+
+// 14. Voice STT (P5) — deterministic transcript → console-grammar normalizer + injectable transcriber.
+{
+  const n = normalizeVoiceCommand;
+  assert(n("run website colon summarize the stack") === "run website: summarize the stack", "voice: spoken 'colon' → ':'");
+  assert(n("Hey Mantra, crew website colon add a health check.") === "crew website: add a health check", "voice: strips wake word + trailing period");
+  assert(n("run bang api colon deploy") === "run! api: deploy", "voice: 'run bang' → 'run!'");
+  assert(n("crew website add a health check endpoint") === "crew website: add a health check endpoint", "voice: inserts ':' after target when none spoken");
+  assert(n("ops website") === "ops website", "voice: ops needs no colon, left intact");
+  assert(n("what is the status") === "what is the status", "voice: non-command speech returned intact");
+
+  // Injectable transcriber: the pipeline (transcribe → normalize) works with a fake, no audio.
+  const t = new FakeTranscriber("run website colon list the entry points");
+  const r = await t.transcribe("/dev/null");
+  assert(normalizeVoiceCommand(r.text) === "run website: list the entry points", "voice: transcribe→normalize pipeline");
+
+  // whisper.cpp driver fails clearly when no model is configured (never silently no-ops).
+  let noModel = false;
+  try { await new WhisperCppTranscriber({ binary: "whisper-cli", model: undefined }).transcribe("/dev/null"); } catch { noModel = true; }
+  assert(noModel, "voice: whisper transcriber requires a model");
 }
 
 console.log("\nAll smoke checks passed ✓");

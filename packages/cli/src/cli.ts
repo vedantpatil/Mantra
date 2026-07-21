@@ -5,6 +5,7 @@ import { crewCommand, type CrewFlags } from "./crew.js";
 import { opsCommand, type OpsFlags } from "./ops.js";
 import { runCommand, type RunFlags } from "./run.js";
 import { shipCommand, type ShipFlags } from "./ship.js";
+import { transcribeCommand } from "./transcribe.js";
 import { vaultCommand } from "./vault.js";
 
 const ROLES: readonly Role[] = ["manager", "developer", "qa", "devops", "marketer", "ops"];
@@ -17,6 +18,7 @@ Usage:
   mantra ship <repo-path> "<title>" [options]   push → PR → CI gate → auto-merge → guarded deploy
   mantra ops  <repo-path>           [options]   monitor configured health signals → triage → escalate
   mantra vault <set|get|list|rm> [key]          manage the encrypted secrets vault (unlock: MANTRA_VAULT_KEY)
+  mantra transcribe <file.wav>                  local whisper.cpp STT → normalized console command
 
 Options:
   --role <role>     (run only) crew role (default: developer) — ${ROLES.join(" | ")}
@@ -64,7 +66,7 @@ async function main(): Promise<number> {
   });
 
   const [command, repo, task] = positionals;
-  const KNOWN = new Set(["run", "crew", "ship", "ops", "vault"]);
+  const KNOWN = new Set(["run", "crew", "ship", "ops", "vault", "transcribe"]);
   if (values.help || !KNOWN.has(command)) {
     console.log(USAGE);
     return values.help ? 0 : command ? 1 : 0;
@@ -72,6 +74,10 @@ async function main(): Promise<number> {
 
   if (command === "vault") {
     return vaultCommand(repo, task); // positionals: <sub> [key]
+  }
+  if (command === "transcribe") {
+    if (!repo) { console.error("✗ usage: mantra transcribe <file.wav>  (model: MANTRA_WHISPER_MODEL)\n"); console.log(USAGE); return 1; }
+    return transcribeCommand(repo); // whisper binary/model from MANTRA_WHISPER_BIN/_MODEL
   }
 
   if (command === "ops") {

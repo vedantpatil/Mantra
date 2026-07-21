@@ -71,6 +71,13 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   `vault://<key>` anywhere a ref is expected (`apiKeyRef`, a deploy `secretRef`); the default
   `CompositeSecretProvider` routes `env://` → env and `vault://` → the vault, a drop-in for the old
   env-only provider (ADR-3).
+  `mantra transcribe <file.wav>` runs **local whisper.cpp STT** (`WhisperCppTranscriber`, binary/model
+  from `MANTRA_WHISPER_BIN`/`MANTRA_WHISPER_MODEL`; audio never leaves the machine) and prints both the
+  raw transcript and the **normalized console command**. `normalizeVoiceCommand` — a deterministic,
+  fully-tested transcript → `<verb> <target>: <text>` mapper (strips a wake/filler phrase, turns spoken
+  "colon" into `:`, "run bang" into `run!`, inserts a colon after the target when none was spoken) — is
+  the same normalizer the desktop push-to-talk routes its transcript through, so **voice and typing
+  converge on one intent path** (§5.7).
 
 ## Install as a Mac app
 
