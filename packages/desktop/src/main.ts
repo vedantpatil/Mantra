@@ -132,6 +132,41 @@ function createWindow(): void {
   void win.loadFile(join(app.getAppPath(), "dist", "index.html"));
 }
 
+/** Edit-intent verbs — their presence flips a plain-English run from read-only to writable. */
+const EDIT_VERBS = /\b(add|fix|implement|change|create|refactor|update|edit|write|rename|remove|delete|build|generate|migrate|replace|install|configure|set\s?up)\b/i;
+
+/**
+ * Resolve a free-form sentence (no `run <project>:` grammar) into a concrete run: pick the
+ * project it names — or the only one configured — and infer read-only vs writable from the verb.
+ */
+function resolveNlRun(raw: string): { ok: true; req: RunRequest; projectName: string } | { ok: false; message: string } {
+  const projects = loadProjects();
+  if (projects.length === 0) return { ok: false, message: "no projects yet — add one in Setup (⚙)." };
+  const text = raw.trim();
+  const lower = text.toLowerCase();
+  const named = projects.find((p) => lower.includes(p.name.toLowerCase()) || lower.includes(p.id.toLowerCase()));
+  const project = named ?? (projects.length === 1 ? projects[0] : undefined);
+  if (!project) {
+    return { ok: false, message: `which project? name one (${projects.map((p) => p.id).join(", ")}) or use \`run <project>: <task>\`.` };
+  }
+  const dryRun = !EDIT_VERBS.test(text);
+  return { ok: true, projectName: project.name, req: { target: project.id, task: text, dryRun } };
+}
+
+/** Map one RunEvent to a console line (or null to swallow it). `ctx` labels crew sub-tasks. */
+function runEventLine(e: RunEvent, ctx?: string): string | null {
+  const tag = ctx ? ` · ${ctx}` : "";
+  switch (e.type) {
+    case "info": return `▸ ${e.message}`;
+    case "warn": return `⚠ ${e.message}`;
+    case "started": return `▸ ${e.role} started (isolated worktree)${tag}`;
+    // Live agent transcript — its words verbatim, and each tool call it makes.
+    case "trace": return e.channel === "tool" ? `  🔧 ${e.text}` : e.text;
+    case "activity": return null; // superseded by richer `trace` lines
+    case "effector": return `[effector] ${JSON.stringify(e.detail)}`;
+  }
+}
+
 async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
   const send = (e: AgentEvent): void => {
     if (!wc.isDestroyed()) wc.send("agent:event", e);
@@ -143,15 +178,8 @@ async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
   }
 
   const onEvent = (e: RunEvent): void => {
-    switch (e.type) {
-      case "info": send({ kind: "line", text: `▸ ${e.message}` }); break;
-      case "warn": send({ kind: "line", text: `⚠ ${e.message}` }); break;
-      case "started": send({ kind: "line", text: `▸ ${e.role} started (isolated worktree)` }); break;
-      // Live agent transcript — its words verbatim, and each tool call it makes.
-      case "trace": send({ kind: "line", text: e.channel === "tool" ? `  🔧 ${e.text}` : e.text }); break;
-      case "activity": break; // superseded by richer `trace` lines
-      case "effector": send({ kind: "line", text: `[effector] ${JSON.stringify(e.detail)}` }); break;
-    }
+    const line = runEventLine(e);
+    if (line !== null) send({ kind: "line", text: line });
   };
 
   const endRun = beginRun({ repoPath, kind: "run", task: req.task, startedAt: Date.now() });
@@ -203,6 +231,11 @@ async function startCrew(req: RunRequest, wc: WebContents): Promise<void> {
       authMode: getAuthMode(),
       confirmer: makeUiConfirmer(wc),
       onCrewEvent,
+      // Stream each sub-agent's live transcript too, so a crew reads as richly as a single run.
+      onRunEvent: (title, e) => {
+        const line = runEventLine(e, title);
+        if (line !== null) send({ kind: "line", text: line });
+      },
     });
     if (!result.ok) {
       send({ kind: "error", message: result.error ?? "crew run failed" });
@@ -345,6 +378,12 @@ void app.whenReady().then(() => {
   ipcMain.handle("intent:submit", (_e, payload: { raw: string; source: IntentSource }) =>
     routeIntent(payload.raw, payload.source),
   );
+  ipcMain.handle("intent:run", (event, raw: string) => {
+    const r = resolveNlRun(raw);
+    if (!r.ok) return { ok: false, message: r.message };
+    void startRun(r.req, event.sender); // fire-and-forget; progress streams via agent:event
+    return { ok: true, message: `▸ ${r.req.dryRun ? "read-only run" : "run (can edit)"} on ${r.projectName}…` };
+  });
   ipcMain.handle("task:run", (event, req: RunRequest) => {
     void startRun(req, event.sender); // fire-and-forget; progress streams via agent:event
     return { ok: true, message: `running: ${req.task}${req.dryRun ? " (dry-run)" : ""}` };

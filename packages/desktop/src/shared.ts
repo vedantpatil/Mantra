@@ -159,6 +159,8 @@ export type AgentEvent =
 /** The safe surface exposed to the renderer via contextBridge. */
 export interface MantraBridge {
   submitIntent(raw: string, source: IntentSource): Promise<IntentAck>;
+  /** Run a free-form natural-language command; resolves the project + read-only/edit mode, then runs. */
+  runIntent(raw: string): Promise<IntentAck>;
   getFleet(): Promise<FleetSnapshot>;
   listProjects(): Promise<readonly ProjectRef[]>;
   /** Kicks off a single-agent run; progress streams via onAgentEvent. */

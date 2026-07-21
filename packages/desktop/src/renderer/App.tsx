@@ -58,6 +58,7 @@ export default function App(): JSX.Element {
   const [lines, setLines] = useState<Line[]>([
     { kind: "sys", text: "Mantra ready. One agent: `run <project>: <task>` (read-only) / `run! …` (edits)." },
     { kind: "sys", text: "A crew: `crew <project>: <goal>` — Manager decomposes → Dev/QA → your review. Or /queue, /status, /help." },
+    { kind: "sys", text: "Or just type plain English — Mantra picks the project and runs it (read-only unless you name a change)." },
   ]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognition = useRef<{ start(): void; stop(): void } | null>(null);
@@ -192,7 +193,8 @@ export default function App(): JSX.Element {
     let ack;
     if (cmd?.verb === "crew") ack = await window.mantra.runCrew({ target: cmd.target, task: cmd.task, dryRun: false });
     else if (cmd) ack = await window.mantra.runTask({ target: cmd.target, task: cmd.task, dryRun: cmd.dryRun });
-    else ack = await window.mantra.submitIntent(text, source);
+    else if (text.startsWith("/")) ack = await window.mantra.submitIntent(text, source); // slash commands
+    else ack = await window.mantra.runIntent(text); // plain English → resolve project + run
     setLines((ls) => [...ls, { kind: ack.ok ? "sys" : "err", text: ack.message }]);
   }
 

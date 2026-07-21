@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("mantra", {
   getSettings: (): Promise<SettingsInfo> => ipcRenderer.invoke("settings:get"),
   saveApiKey: (key: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setApiKey", key),
   saveGithubToken: (token: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setGithubToken", token),
+  runIntent: (raw: string): Promise<IntentAck> => ipcRenderer.invoke("intent:run", raw),
   setAuthMode: (mode: AuthMode): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setAuthMode", mode),
   checkAuth: (): Promise<AuthHealth> => ipcRenderer.invoke("settings:checkAuth"),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("settings:pickFolder"),
