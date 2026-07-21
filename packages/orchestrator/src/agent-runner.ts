@@ -82,6 +82,22 @@ const CAPABILITY_TO_ACTION: Partial<Record<string, ActionKind>> = {
   fsDelete: "fsDelete",
 };
 
+/** A block in an assistant message we care to surface: the agent's words or a tool call. */
+interface TextBlock { readonly type: "text"; readonly text: string; }
+interface ToolUseBlock { readonly type: "tool_use"; readonly name: string; readonly input: unknown; }
+type ContentBlock = TextBlock | ToolUseBlock | { readonly type: string };
+
+/** One-line summary of a tool call for the activity transcript, e.g. `Read(src/app.ts)`. */
+function describeToolUse(name: string, input: unknown): string {
+  const io = (input ?? {}) as Record<string, unknown>;
+  const str = (k: string): string | undefined => (typeof io[k] === "string" ? (io[k] as string) : undefined);
+  const detail =
+    str("file_path") ?? str("path") ?? str("command") ?? str("pattern") ?? str("query") ?? str("url") ??
+    (Object.keys(io).length ? JSON.stringify(io) : "");
+  const short = detail.length > 120 ? `${detail.slice(0, 120)}…` : detail;
+  return short ? `${name}(${short})` : name;
+}
+
 export class AgentRunner {
   private readonly effector: Effector;
 
@@ -179,6 +195,20 @@ export class AgentRunner {
       if (message.type === "system" && message.subtype === "init") {
         sessionId = message.session_id;
       } else if (message.type === "assistant") {
+        // Surface the agent's actual transcript (its words + each tool call) instead of a
+        // generic "working…" — this is what makes the console read like a Claude Code session.
+        const content = (message as { message?: { content?: unknown } }).message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content as ContentBlock[]) {
+            if (block.type === "text") {
+              const text = (block as TextBlock).text.trim();
+              if (text) await bus.publish(`agent.${spec.projectId}.trace`, { agentId: spec.id, channel: "text", text });
+            } else if (block.type === "tool_use") {
+              const tb = block as ToolUseBlock;
+              await bus.publish(`agent.${spec.projectId}.trace`, { agentId: spec.id, channel: "tool", text: describeToolUse(tb.name, tb.input) });
+            }
+          }
+        }
         await bus.publish(`agent.${spec.projectId}.activity`, { agentId: spec.id });
       } else if (message.type === "result") {
         sessionId = message.session_id;

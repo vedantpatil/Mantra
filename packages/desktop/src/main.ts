@@ -147,7 +147,9 @@ async function startRun(req: RunRequest, wc: WebContents): Promise<void> {
       case "info": send({ kind: "line", text: `▸ ${e.message}` }); break;
       case "warn": send({ kind: "line", text: `⚠ ${e.message}` }); break;
       case "started": send({ kind: "line", text: `▸ ${e.role} started (isolated worktree)` }); break;
-      case "activity": send({ kind: "line", text: "· working…" }); break;
+      // Live agent transcript — its words verbatim, and each tool call it makes.
+      case "trace": send({ kind: "line", text: e.channel === "tool" ? `  🔧 ${e.text}` : e.text }); break;
+      case "activity": break; // superseded by richer `trace` lines
       case "effector": send({ kind: "line", text: `[effector] ${JSON.stringify(e.detail)}` }); break;
     }
   };

@@ -21,6 +21,8 @@ export type RunEvent =
   | { readonly type: "info"; readonly message: string }
   | { readonly type: "started"; readonly role: Role }
   | { readonly type: "activity" }
+  /** Live transcript from the agent: its text ("text") or a tool call ("tool"). */
+  | { readonly type: "trace"; readonly channel: "text" | "tool"; readonly text: string }
   | { readonly type: "effector"; readonly detail: unknown }
   | { readonly type: "warn"; readonly message: string };
 
@@ -117,6 +119,10 @@ export async function runAgentTask(opts: RunTaskOptions): Promise<RunTaskResult>
   const bus = new InProcessBus();
   bus.subscribe(`agent.${pid}.started`, () => emit({ type: "started", role: opts.role }));
   bus.subscribe(`agent.${pid}.activity`, () => emit({ type: "activity" }));
+  bus.subscribe(`agent.${pid}.trace`, (m) => {
+    const p = m.payload as { channel: "text" | "tool"; text: string };
+    emit({ type: "trace", channel: p.channel, text: p.text });
+  });
   bus.subscribe(`agent.${pid}.effector`, (m) => emit({ type: "effector", detail: m.payload }));
 
   const worktrees = new WorktreeManager(opts.repoPath);

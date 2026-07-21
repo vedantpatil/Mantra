@@ -22,7 +22,8 @@ export async function runCommand(repoArg: string, task: string, flags: RunFlags)
       case "info": console.log(`▸ ${e.message}`); break;
       case "warn": console.warn(`⚠ ${e.message}`); break;
       case "started": console.log(`▸ ${e.role} started (cwd = worktree)`); break;
-      case "activity": process.stdout.write("·"); break;
+      case "trace": console.log(e.channel === "tool" ? `  🔧 ${e.text}` : e.text); break;
+      case "activity": break; // superseded by richer `trace` output
       case "effector": console.log(`\n[effector] ${JSON.stringify(e.detail)}`); break;
     }
   };
