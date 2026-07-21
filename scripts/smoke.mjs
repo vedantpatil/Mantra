@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGrant, taskId, agentId, projectId, decisionId, secretRef } from "@mantra/core";
-import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip } from "@mantra/orchestrator";
+import { CircuitBreaker, InProcessBus, Supervisor, decideTool, capabilityForBash, SqliteRegistry, FileTaskLog, EnvSecretProvider, envRef, defaultProjectConfig, resolveDualGraph, Coordinator, HeuristicPlanner, parseTaskList, Effector, runShip, OpsMonitor, MemoryAuditLog } from "@mantra/orchestrator";
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } else console.log("ok  ", msg); };
 
@@ -239,6 +239,69 @@ const newSup = (sink) => new Supervisor(projectId("crew"), new InProcessBus(), (
     const host = fakeHost(["success"]);
     const r = await runShip({ ...baseOpts, role: "marketer", host, effector: effector(true), ci: fast });
     assert(!r.ok && r.stage === "push" && !host.merged(), "ship: role denied gitPush → aborts at push");
+  }
+}
+
+// 12. Ops agent triage (P5) — deterministic monitor→triage→escalate, proven with scripted probes.
+{
+  // A probe that walks a scripted list of statuses; the last value repeats.
+  const scriptProbe = (name, statuses) => {
+    let i = 0;
+    return { name, check: async () => ({ status: statuses[Math.min(i++, statuses.length - 1)] }) };
+  };
+  // Run N ticks, collecting every event; returns the flat event list.
+  const drive = async (mon, ticks) => {
+    const all = [];
+    for (let k = 0; k < ticks; k++) all.push(...(await mon.tick()));
+    return all;
+  };
+  const count = (evs, type) => evs.filter((e) => e.type === type).length;
+
+  // single blip → never escalates (debounce).
+  {
+    const mon = new OpsMonitor({ probes: [scriptProbe("web", ["critical", "ok", "ok"])] });
+    const evs = await drive(mon, 3);
+    assert(count(evs, "escalated") === 0 && mon.incidents().length === 0, "ops: single blip → no escalation (debounce)");
+  }
+  // two consecutive criticals → escalate once; further criticals suppressed (cooldown).
+  {
+    const mon = new OpsMonitor({ probes: [scriptProbe("web", ["critical", "critical", "critical", "critical"])] });
+    const evs = await drive(mon, 4);
+    assert(count(evs, "escalated") === 1 && mon.incidents().length === 1, "ops: sustained critical → escalate once, then suppress");
+  }
+  // recovery → the open incident resolves and clears.
+  {
+    const mon = new OpsMonitor({ probes: [scriptProbe("web", ["critical", "critical", "ok"])] });
+    const evs = await drive(mon, 3);
+    assert(count(evs, "escalated") === 1 && count(evs, "resolved") === 1 && mon.incidents().length === 0, "ops: recovery → incident resolved");
+  }
+  // warn debounces at 3 (not 2).
+  {
+    const mon = new OpsMonitor({ probes: [scriptProbe("web", ["warn", "warn", "warn"])] });
+    const evs = await drive(mon, 3);
+    assert(count(evs, "escalated") === 1 && mon.incidents()[0].severity === "warn", "ops: warn escalates at threshold 3");
+  }
+  // severity upgrade → warn incident re-escalates as critical.
+  {
+    const mon = new OpsMonitor({ probes: [scriptProbe("web", ["warn", "warn", "warn", "critical", "critical"])] });
+    const evs = await drive(mon, 5);
+    const ups = evs.filter((e) => e.type === "escalated" && e.upgraded);
+    assert(count(evs, "escalated") === 2 && ups.length === 1 && mon.incidents()[0].severity === "critical", "ops: warn→critical upgrade re-escalates");
+  }
+  // escalation + resolution are written to the audit trail (FR-24).
+  {
+    const audit = new MemoryAuditLog();
+    const mon = new OpsMonitor({ probes: [scriptProbe("web", ["critical", "critical", "ok"])], audit, project: "web" });
+    await drive(mon, 3);
+    const kinds = audit.entries().map((e) => e.kind);
+    assert(kinds.includes("ops.escalated") && kinds.includes("ops.resolved"), "ops: escalation + resolution audited");
+  }
+  // a throwing probe is itself treated as critical.
+  {
+    const throwing = { name: "db", check: async () => { throw new Error("no route to host"); } };
+    const mon = new OpsMonitor({ probes: [throwing] });
+    const evs = await drive(mon, 2);
+    assert(count(evs, "probe-error") === 2 && count(evs, "escalated") === 1, "ops: probe error → critical → escalates");
   }
 }
 

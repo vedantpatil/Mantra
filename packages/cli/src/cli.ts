@@ -2,6 +2,7 @@
 import { parseArgs } from "node:util";
 import type { Role } from "@mantra/core";
 import { crewCommand, type CrewFlags } from "./crew.js";
+import { opsCommand, type OpsFlags } from "./ops.js";
 import { runCommand, type RunFlags } from "./run.js";
 import { shipCommand, type ShipFlags } from "./ship.js";
 
@@ -13,6 +14,7 @@ Usage:
   mantra run  <repo-path> "<task>"  [options]   run a single agent task
   mantra crew <repo-path> "<goal>"  [options]   decompose a goal + drive the crew to review
   mantra ship <repo-path> "<title>" [options]   push → PR → CI gate → auto-merge → guarded deploy
+  mantra ops  <repo-path>           [options]   monitor configured health signals → triage → escalate
 
 Options:
   --role <role>     (run only) crew role (default: developer) — ${ROLES.join(" | ")}
@@ -27,6 +29,8 @@ Options:
   --deploy <env>    (ship only) deploy after a green merge — always confirmed
   --deploy-cmd <c>  (ship only) shell command the deploy runs (in the repo)
   --no-merge        (ship only) stop at a green PR instead of auto-merging
+  --once            (ops only)  run one monitor pass and exit (else poll continuously)
+  --interval <sec>  (ops only)  seconds between polls (default: 30)
   -h, --help        show this help
 
 First live tests (clone a throwaway repo first):
@@ -51,16 +55,33 @@ async function main(): Promise<number> {
       deploy: { type: "string" },
       "deploy-cmd": { type: "string" },
       "no-merge": { type: "boolean", default: false },
+      once: { type: "boolean", default: false },
+      interval: { type: "string", default: "30" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
 
   const [command, repo, task] = positionals;
-  const KNOWN = new Set(["run", "crew", "ship"]);
+  const KNOWN = new Set(["run", "crew", "ship", "ops"]);
   if (values.help || !KNOWN.has(command)) {
     console.log(USAGE);
     return values.help ? 0 : command ? 1 : 0;
   }
+
+  if (command === "ops") {
+    if (!repo) {
+      console.error("✗ usage: mantra ops <repo-path> [--once] [--interval <sec>]\n");
+      console.log(USAGE);
+      return 1;
+    }
+    const intervalSec = Number(values.interval);
+    if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
+      console.error(`✗ --interval must be a positive number, got '${values.interval}'`);
+      return 1;
+    }
+    return opsCommand(repo, { once: values.once as boolean, intervalSec });
+  }
+
   if (!repo || !task) {
     const noun = command === "crew" ? "goal" : command === "ship" ? "title" : "task";
     console.error(`✗ usage: mantra ${command} <repo-path> "<${noun}>"\n`);

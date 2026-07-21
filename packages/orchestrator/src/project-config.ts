@@ -24,6 +24,8 @@ export interface ProjectConfig {
     readonly args?: readonly string[];
     readonly env?: Readonly<Record<string, string>>;
   };
+  /** Health signals the Ops agent watches (P5/FR-24). Each is polled by `mantra ops`. */
+  readonly monitors?: readonly { readonly name: string; readonly url: string }[];
 }
 
 export function defaultProjectConfig(name: string): ProjectConfig {

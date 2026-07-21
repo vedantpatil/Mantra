@@ -18,3 +18,5 @@ export * from "./agent-planner.js";
 export * from "./run-crew.js";
 export * from "./ship.js";
 export * from "./git-host.js";
+export * from "./audit.js";
+export * from "./ops.js";

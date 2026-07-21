@@ -53,6 +53,13 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   `--deploy <env>` behind the confirm gate (deploy is always human-confirmed, ADR-2). Push + deploy
   route through the trusted Effector (permission matrix + `gh`/`git` drivers); the gate logic is
   deterministic and proven offline with fakes. Flags: `--base --branch --deploy --deploy-cmd --no-merge`.
+  `mantra ops <repo>` runs the **P5 Ops agent** (`OpsMonitor`): polls the project's configured
+  `monitors` (health URLs), then **triages deterministically** — a signal must stay bad for a
+  debounce threshold before it escalates (a single blip never pages), one open incident per probe
+  (natural cooldown), a warn→critical severity change re-escalates, and recovery auto-resolves.
+  Ops never auto-remediates anything irreversible — it *escalates* to the operator (human-gated,
+  ADR-2). Every transition is written to the append-only **audit trail** (`.mantra/state/audit.jsonl`,
+  FR-24). Flags: `--once --interval <sec>`.
 
 ## Install as a Mac app
 
