@@ -57,12 +57,25 @@ export interface ProjectRef {
   readonly repoPath: string;
 }
 
+/** A health signal watched by the Ops agent, editable from the UI. */
+export interface MonitorRef {
+  readonly name: string;
+  readonly url: string;
+}
+
+/** A project plus its Ops monitors, as shown in Setup. */
+export interface ProjectSettings extends ProjectRef {
+  readonly monitors: readonly MonitorRef[];
+}
+
 /** Everything the in-app Settings screen needs — so the app is set up entirely from the UI. */
 export interface SettingsInfo {
   readonly apiKeySet: boolean;
   readonly apiKeySource: "env" | "config" | "none";
   readonly apiKeyMasked?: string;
-  readonly projects: readonly ProjectRef[];
+  readonly githubSet: boolean;
+  readonly githubMasked?: string;
+  readonly projects: readonly ProjectSettings[];
 }
 
 export interface RunRequest {
@@ -156,12 +169,18 @@ export interface MantraBridge {
   getSettings(): Promise<SettingsInfo>;
   /** Save the Anthropic API key (persists to config.json + applies live). */
   saveApiKey(key: string): Promise<SettingsInfo>;
+  /** Save a GitHub token so Ship works without a terminal `gh auth login`. */
+  saveGithubToken(token: string): Promise<SettingsInfo>;
   /** Open a native folder picker; returns the chosen absolute path (or undefined if cancelled). */
   pickFolder(): Promise<string | undefined>;
   /** Add a project by name + repo path; returns the updated settings. */
   addProject(name: string, repoPath: string): Promise<SettingsInfo>;
   /** Remove a project by id; returns the updated settings. */
   removeProject(id: string): Promise<SettingsInfo>;
+  /** Add an Ops health monitor (name + URL) to a project; returns the updated settings. */
+  addMonitor(repoPath: string, name: string, url: string): Promise<SettingsInfo>;
+  /** Remove an Ops monitor by name from a project; returns the updated settings. */
+  removeMonitor(repoPath: string, name: string): Promise<SettingsInfo>;
   /** Subscribe to live run events; returns an unsubscribe function. */
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   /** Subscribe to irreversible-op confirmation requests; returns an unsubscribe function. */

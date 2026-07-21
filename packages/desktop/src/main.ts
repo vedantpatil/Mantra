@@ -6,18 +6,20 @@ import { projectId, taskId as makeTaskId } from "@mantra/core";
 import {
   type AuditEvent, type Confirmer, type CrewEvent, Effector, FileAuditLog, FileTaskLog,
   GhGitHost, InProcessBus, OpsMonitor, type RunEvent, type ShipEvent, Supervisor, defaultSecretProvider,
-  httpProbe, isGitRepo, liveShipEffects, loadProjectConfig, normalizeVoiceCommand, runAgentTask, runCrew, runShip,
+  httpProbe, isGitRepo, liveShipEffects, loadProjectConfig, normalizeVoiceCommand, runAgentTask, runCrew,
+  runShip, saveProjectConfig,
 } from "@mantra/orchestrator";
 import type {
   ActiveRun, AgentEvent, AuditEntry, IntentSource, OpsIncident, ReviewItem, RunRequest, ShipRequest,
 } from "./shared.js";
 import { routeIntent } from "./intent.js";
 import { buildFleet } from "./fleet-stub.js";
-import { apiKeyStatus, loadApiKeyIntoEnv, saveApiKey } from "./config.js";
+import { apiKeyStatus, githubStatus, loadApiKeyIntoEnv, loadGithubTokenIntoEnv, saveApiKey, saveGithubToken } from "./config.js";
 import { addProject, loadProjects, removeProject, resolveTarget } from "./projects.js";
-import type { SettingsInfo } from "./shared.js";
+import type { ProjectSettings, SettingsInfo } from "./shared.js";
 
 loadApiKeyIntoEnv(); // make the API key available to Finder-launched (double-clicked) app
+loadGithubTokenIntoEnv(); // and the GitHub token, so `gh` in the ship pipeline is authed
 
 /**
  * Electron main process — the trusted host. Owns the run pipeline and exposes only a
@@ -77,10 +79,31 @@ function supervisorFor(repoPath: string): Supervisor {
   return sup;
 }
 
-/** Snapshot of setup state for the Settings screen (API key + projects). */
+/** Read a project's configured Ops monitors (guarded — a stale/unreadable config yields none). */
+function monitorsFor(repoPath: string, name: string): ProjectSettings["monitors"] {
+  try {
+    return loadProjectConfig(repoPath, name).monitors ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Snapshot of setup state for the Settings screen (API key + GitHub token + projects + monitors). */
 function settings(): SettingsInfo {
   const k = apiKeyStatus();
-  return { apiKeySet: k.set, apiKeySource: k.source, ...(k.masked ? { apiKeyMasked: k.masked } : {}), projects: loadProjects() };
+  const g = githubStatus();
+  const projects: ProjectSettings[] = loadProjects().map((p) => ({ ...p, monitors: monitorsFor(p.repoPath, p.name) }));
+  return {
+    apiKeySet: k.set, apiKeySource: k.source, ...(k.masked ? { apiKeyMasked: k.masked } : {}),
+    githubSet: g.set, ...(g.masked ? { githubMasked: g.masked } : {}),
+    projects,
+  };
+}
+
+/** Add/remove an Ops monitor in a project's `.mantra/config.json` (creates it from defaults if absent). */
+function setMonitors(repoPath: string, update: (m: { name: string; url: string }[]) => { name: string; url: string }[]): void {
+  const cfg = loadProjectConfig(repoPath, basename(repoPath)); // default when absent; throws on version mismatch
+  saveProjectConfig(repoPath, { ...cfg, monitors: update([...(cfg.monitors ?? [])]) });
 }
 
 /** Collect review-gate tasks across all registered projects (FR-2 / FR-14). */
@@ -248,8 +271,13 @@ async function startShip(req: ShipRequest, wc: WebContents): Promise<void> {
  * the Incidents rail) and are written to that project's audit trail by the engine. Skipped under
  * the boot smoke so it never fires network probes during the headless check.
  */
+let opsTimer: ReturnType<typeof setInterval> | undefined;
+
+/** (Re)build the Ops monitoring loop from current project configs — called on setup changes. */
 function startOpsMonitoring(): void {
   if (process.env.MANTRA_SMOKE === "1") return;
+  if (opsTimer) { clearInterval(opsTimer); opsTimer = undefined; }
+  if (openIncidents.size) { openIncidents.clear(); broadcast("incidents-changed"); broadcast("fleet-changed"); }
   const monitors: OpsMonitor[] = [];
   for (const p of loadProjects()) {
     const cfg = loadProjectConfig(p.repoPath, p.name);
@@ -277,7 +305,7 @@ function startOpsMonitoring(): void {
   if (monitors.length === 0) return;
   const tickAll = (): void => { for (const m of monitors) void m.tick(); };
   tickAll();
-  setInterval(tickAll, 30_000);
+  opsTimer = setInterval(tickAll, 30_000);
 }
 
 /** Read the recent audit trail across all projects, newest first, for the renderer's activity feed. */
@@ -347,6 +375,20 @@ void app.whenReady().then(() => {
     broadcastFleetChanged(); // a newly-set key can unblock runs
     return settings();
   });
+  ipcMain.handle("settings:setGithubToken", (_e, token: string) => {
+    saveGithubToken(token.trim());
+    return settings();
+  });
+  ipcMain.handle("monitors:add", (_e, repoPath: string, name: string, url: string) => {
+    setMonitors(repoPath, (m) => [...m.filter((x) => x.name !== name.trim()), { name: name.trim(), url: url.trim() }]);
+    startOpsMonitoring(); // pick up the new monitor without a restart
+    return settings();
+  });
+  ipcMain.handle("monitors:remove", (_e, repoPath: string, name: string) => {
+    setMonitors(repoPath, (m) => m.filter((x) => x.name !== name));
+    startOpsMonitoring();
+    return settings();
+  });
   ipcMain.handle("settings:pickFolder", async () => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
     const res = win
@@ -356,11 +398,13 @@ void app.whenReady().then(() => {
   });
   ipcMain.handle("projects:add", (_e, name: string, repoPath: string) => {
     addProject(name, repoPath);
+    startOpsMonitoring(); // a new project may bring its own monitors
     broadcastFleetChanged();
     return settings();
   });
   ipcMain.handle("projects:remove", (_e, id: string) => {
     removeProject(id);
+    startOpsMonitoring();
     broadcastFleetChanged();
     return settings();
   });

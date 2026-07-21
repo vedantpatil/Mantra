@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 interface GlobalConfig {
   anthropicApiKey?: string;
+  githubToken?: string;
   [k: string]: unknown;
 }
 
@@ -48,4 +49,28 @@ export function apiKeyStatus(): { set: boolean; source: "env" | "config" | "none
   if (!key) return { set: false, source: "none" };
   const masked = key.length > 8 ? `${key.slice(0, 6)}…${key.slice(-4)}` : "set";
   return { set: true, source: envKey ? "env" : "config", masked };
+}
+
+/**
+ * GitHub token for `gh` (used by the ship pipeline). `gh` honours `GH_TOKEN`, so storing a PAT
+ * from the UI and exporting it makes Ship work without a terminal `gh auth login`. A shell
+ * `GH_TOKEN`/`GITHUB_TOKEN` still wins.
+ */
+export function loadGithubTokenIntoEnv(): void {
+  if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) return;
+  const token = readConfig().githubToken;
+  if (token) process.env.GH_TOKEN = token;
+}
+
+export function saveGithubToken(token: string): void {
+  const path = configPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ ...readConfig(), githubToken: token }, null, 2)}\n`, { mode: 0o600 });
+  process.env.GH_TOKEN = token; // gh picks this up immediately
+}
+
+export function githubStatus(): { set: boolean; masked?: string } {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || readConfig().githubToken;
+  if (!token) return { set: false };
+  return { set: true, masked: token.length > 8 ? `${token.slice(0, 4)}…${token.slice(-4)}` : "set" };
 }

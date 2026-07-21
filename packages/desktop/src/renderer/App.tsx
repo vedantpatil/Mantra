@@ -46,8 +46,10 @@ export default function App(): JSX.Element {
   const [settings, setSettings] = useState<SettingsInfo | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [githubInput, setGithubInput] = useState("");
   const [projName, setProjName] = useState("");
   const [projPath, setProjPath] = useState("");
+  const [monInputs, setMonInputs] = useState<Record<string, { name: string; url: string }>>({});
   const [mode, setMode] = useState<IntentSource>("console");
   const [listening, setListening] = useState(false);
   const [input, setInput] = useState("");
@@ -120,9 +122,27 @@ export default function App(): JSX.Element {
     setApiKeyInput("");
     setLines((ls) => [...ls, { kind: "sys", text: "✓ API key saved — live runs are ready." }]);
   }
+  async function onSaveGithub(): Promise<void> {
+    if (!githubInput.trim()) return;
+    setSettings(await window.mantra.saveGithubToken(githubInput.trim()));
+    setGithubInput("");
+    setLines((ls) => [...ls, { kind: "sys", text: "✓ GitHub token saved — Ship can push/merge without `gh auth login`." }]);
+  }
   async function onPickFolder(): Promise<void> {
     const p = await window.mantra.pickFolder();
     if (p) { setProjPath(p); if (!projName.trim()) setProjName(p.split("/").filter(Boolean).pop() ?? ""); }
+  }
+  const monInput = (repo: string): { name: string; url: string } => monInputs[repo] ?? { name: "", url: "" };
+  const setMon = (repo: string, patch: Partial<{ name: string; url: string }>): void =>
+    setMonInputs((m) => ({ ...m, [repo]: { ...monInput(repo), ...patch } }));
+  async function onAddMonitor(repoPath: string): Promise<void> {
+    const { name, url } = monInput(repoPath);
+    if (!name.trim() || !url.trim()) return;
+    setSettings(await window.mantra.addMonitor(repoPath, name.trim(), url.trim()));
+    setMonInputs((m) => ({ ...m, [repoPath]: { name: "", url: "" } }));
+  }
+  async function onRemoveMonitor(repoPath: string, name: string): Promise<void> {
+    setSettings(await window.mantra.removeMonitor(repoPath, name));
   }
   async function onAddProject(): Promise<void> {
     if (!projName.trim() || !projPath.trim()) return;
@@ -234,13 +254,44 @@ export default function App(): JSX.Element {
               </div>
 
               <div className="set-sec">
-                <div className="set-label">Projects</div>
+                <div className="set-label">GitHub token <span style={{ textTransform: "none", letterSpacing: 0, color: "var(--faint)" }}>— for Ship (push / PR / merge)</span></div>
+                <div className="set-status">
+                  {settings?.githubSet
+                    ? <>✓ set <code>{settings.githubMasked}</code></>
+                    : <span className="warn-txt">not set — Ship needs it (a PAT with repo scope)</span>}
+                </div>
+                <div className="set-row">
+                  <input
+                    className="set-input" type="password" placeholder="ghp_… or github_pat_…"
+                    value={githubInput} onChange={(e) => setGithubInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void onSaveGithub(); }}
+                  />
+                  <button className="db primary" onClick={() => void onSaveGithub()}>Save</button>
+                </div>
+              </div>
+
+              <div className="set-sec">
+                <div className="set-label">Projects &amp; monitors</div>
                 {settings && settings.projects.length > 0 ? (
                   settings.projects.map((p) => (
                     <div className="set-proj" key={p.id}>
                       <div className="set-proj-t">{p.name}</div>
                       <div className="set-proj-p">{p.repoPath}</div>
                       <button className="db ghost" onClick={() => void onRemoveProject(p.id)}>Remove</button>
+                      <div className="set-mons">
+                        {p.monitors.map((m) => (
+                          <div className="set-mon" key={m.name}>
+                            <span className="set-mon-n">{m.name}</span>
+                            <span className="set-mon-u">{m.url}</span>
+                            <button className="mon-x" title="Remove monitor" onClick={() => void onRemoveMonitor(p.repoPath, m.name)}>✕</button>
+                          </div>
+                        ))}
+                        <div className="set-row">
+                          <input className="set-input sm" placeholder="monitor name" value={monInput(p.repoPath).name} onChange={(e) => setMon(p.repoPath, { name: e.target.value })} />
+                          <input className="set-input sm" placeholder="https://…/health" value={monInput(p.repoPath).url} onChange={(e) => setMon(p.repoPath, { url: e.target.value })} />
+                          <button className="db" onClick={() => void onAddMonitor(p.repoPath)} disabled={!monInput(p.repoPath).name.trim() || !monInput(p.repoPath).url.trim()}>+ Monitor</button>
+                        </div>
+                      </div>
                     </div>
                   ))
                 ) : <div className="set-status">No projects yet.</div>}

@@ -18,9 +18,12 @@ contextBridge.exposeInMainWorld("mantra", {
   normalizeVoice: (text: string): Promise<string> => ipcRenderer.invoke("voice:normalize", text),
   getSettings: (): Promise<SettingsInfo> => ipcRenderer.invoke("settings:get"),
   saveApiKey: (key: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setApiKey", key),
+  saveGithubToken: (token: string): Promise<SettingsInfo> => ipcRenderer.invoke("settings:setGithubToken", token),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("settings:pickFolder"),
   addProject: (name: string, repoPath: string): Promise<SettingsInfo> => ipcRenderer.invoke("projects:add", name, repoPath),
   removeProject: (id: string): Promise<SettingsInfo> => ipcRenderer.invoke("projects:remove", id),
+  addMonitor: (repoPath: string, name: string, url: string): Promise<SettingsInfo> => ipcRenderer.invoke("monitors:add", repoPath, name, url),
+  removeMonitor: (repoPath: string, name: string): Promise<SettingsInfo> => ipcRenderer.invoke("monitors:remove", repoPath, name),
   onAgentEvent: (cb: (event: AgentEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AgentEvent): void => cb(payload);
     ipcRenderer.on("agent:event", listener);
