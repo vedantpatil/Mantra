@@ -40,6 +40,9 @@ concurrency and failure — **safety is enforced by deterministic code, never by
   worktree (ADR-1), attaches the **dual-graph context MCP** with a retrieve-before-explore
   contract (FR-13a/ADR-11), runs the agent under the permission matrix + circuit breaker, then
   leaves the diff for review. Flags: `--role --model --budget --no-push --no-graph --dry-run --keep`.
+  `mantra crew <repo> "<goal>"` drives the full P2 crew instead: the Manager decomposes the goal,
+  Dev/QA execute each task to the human review gate, state persists under `.mantra/state/` (so it's
+  resumable), and the run is always push-denied. Same `runCrew()` pipeline the desktop console uses.
 
 ## Install as a Mac app
 
